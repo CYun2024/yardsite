@@ -1,0 +1,9 @@
+# Gradle wrapper 在 Linux/macOS/CI 上会被直接执行，必须保持 LF；
+# 否则 Windows 上克隆一提交一检出变成 CRLF，`./gradlew` 会报 bad interpreter。
+gradlew text eol=lf
+gradlew.bat text eol=crlf
+*.sh text eol=lf
+
+# 二进制资源别做换行转换
+*.jar binary
+*.png binary
