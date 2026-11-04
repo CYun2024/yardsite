@@ -22,7 +22,15 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      # libs/ 里没有 Sodium 也能编过（那组 mixin 会自动跳过）
+      # Sodium 只是编译期依赖（不打包）：从 Modrinth 的 maven 取一份放进 libs/，
+      # 这样 CI 出的 jar 和本地带 Sodium 钩子的那份一致。取不到也照样能编（那组 mixin 会跳过）。
+      - name: Fetch Sodium (compile only)
+        continue-on-error: true
+        run: |
+          mkdir -p libs
+          curl -sSL --retry 3 -o "libs/sodium-neoforge-0.8.13+mc1.21.1-mod.jar" \
+            "https://api.modrinth.com/maven/maven/modrinth/sodium/mc1.21.1-0.8.13-neoforge/sodium-mc1.21.1-0.8.13-neoforge.jar"
+
       - name: Build
         run: chmod +x gradlew && ./gradlew build --stacktrace --no-daemon
 
