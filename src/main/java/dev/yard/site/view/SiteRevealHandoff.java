@@ -1,5 +1,6 @@
 package dev.yard.site.view;
 
+import dev.yard.site.YardSiteLog;
 import dev.yard.site.client.ChunkLoadDiagnostics;
 import net.minecraft.client.gui.screens.Screen;
 
@@ -68,7 +69,7 @@ public final class SiteRevealHandoff {
         Payload previous = payload;
         payload = new Payload(planner, view, mapX, mapY, mapSize, siteX, siteZ);
         if (previous != null) previous.close();
-        System.out.println("[yardsite] 选址交接给生成动画：落点 x=" + siteX + " z=" + siteZ
+        YardSiteLog.debug("选址交接给生成动画：落点 x=" + siteX + " z=" + siteZ
                 + "，格子采样 " + planner.field().progress() + "/" + planner.field().progressTotal());
     }
 
@@ -86,7 +87,7 @@ public final class SiteRevealHandoff {
         payload = null;
         if (System.currentTimeMillis() - currentPayload.createdAtMs > VALID_MS) {
             currentPayload.close();
-            System.out.println("[yardsite] 选址交接已过期，按原版加载界面走");
+            YardSiteLog.debug("选址交接已过期，按原版加载界面走");
             return vanilla;
         }
         try {
@@ -94,8 +95,7 @@ public final class SiteRevealHandoff {
             return new SiteRevealScreen(currentPayload);
         } catch (Throwable t) {
             currentPayload.close();
-            System.out.println("[yardsite] 生成动画界面起不来，退回原版加载界面：" + t);
-            t.printStackTrace();
+            YardSiteLog.warn("生成动画界面起不来，退回原版加载界面", t);
             return vanilla;
         }
     }

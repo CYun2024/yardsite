@@ -4,7 +4,7 @@ license="MIT"
 
 [[mods]]
 modId="yardsite"
-version="0.1.0"
+version="0.1.1"
 displayName="Yard Site · 群系选区"
 authors="CYun_CYER"
 description='''创建单人世界前先看一张出生点附近的地形与群系图，把落点定准，再随一段落成镜头进世界。

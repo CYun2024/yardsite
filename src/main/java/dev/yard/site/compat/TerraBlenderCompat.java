@@ -1,5 +1,6 @@
 package dev.yard.site.compat;
 
+import dev.yard.site.YardSiteLog;
 import net.minecraft.core.Holder;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.world.level.biome.Biome;
@@ -54,19 +55,19 @@ public final class TerraBlenderCompat {
         try {
             Object regionType = regionTypeForDimension.invoke(null, dimensionType);
             if (regionType == null) {
-                System.out.println("[yardsite] 选址图：这个维度类型没登记进 TerraBlender 的区域表，按原版群系画");
+                YardSiteLog.debug("选址图：这个维度类型没登记进 TerraBlender 的区域表，按原版群系画");
                 return source;
             }
             Climate.ParameterList<Holder<Biome>> original = readParameters(source);
             Climate.ParameterList<Holder<Biome>> copy = new Climate.ParameterList<>(original.values());
             initializeForTerraBlender.invoke(copy, registries, regionType, seed);
             MultiNoiseBiomeSource preview = MultiNoiseBiomeSource.createFromList(copy);
-            System.out.println("[yardsite] 选址图接管 TerraBlender 群系：区域类型 " + regionType
+            YardSiteLog.debug("选址图接管 TerraBlender 群系：区域类型 " + regionType
                     + "，种子 " + seed + "，参数表复制自 " + original.values().size() + " 条（"
                     + (System.currentTimeMillis() - started) + " ms）");
             return preview;
         } catch (ReflectiveOperationException | RuntimeException | Error t) {
-            System.out.println("[yardsite] 选址图没接上 TerraBlender（" + t + "），按原版群系画");
+            YardSiteLog.debug("选址图没接上 TerraBlender（" + t + "），按原版群系画");
             return source;
         }
     }
@@ -89,7 +90,7 @@ public final class TerraBlenderCompat {
             initializeForTerraBlender = extendedList.getMethod("initializeForTerraBlender",
                     RegistryAccess.class, regionType, long.class);
             parametersGetter = findParametersMethod();
-            System.out.println("[yardsite] TerraBlender 兼容已启用（选址图按它的区域表取群系，只作用于预览副本）");
+            YardSiteLog.debug("TerraBlender 兼容已启用（选址图按它的区域表取群系，只作用于预览副本）");
         } catch (Throwable ignored) {
             // 没装 TerraBlender，或版本对不上这些内部类名：整套静默关闭
             regionTypeForDimension = null;

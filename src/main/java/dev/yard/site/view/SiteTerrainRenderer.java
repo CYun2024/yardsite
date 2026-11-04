@@ -1,5 +1,6 @@
 package dev.yard.site.view;
 
+import dev.yard.site.YardSiteLog;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import dev.yard.site.api.BlueprintBox;
@@ -486,12 +487,14 @@ final class SiteTerrainRenderer {
         RenderSystem.enableCull();
         long flushNs = System.nanoTime() - t1;
 
-        long gcCount = gcTotal();
-        long gcTime = gcMillis();
-        if (now >= nextLogAt) {
+        // 每两秒一条的帧统计只给开发用（-Dyardsite.debug=true）；关着时连 GC 计数都不去查，
+        // 也别每帧拼那串字符串 —— 这个是渲染热路径，一帧一帧地拼下来是白花的钱。
+        if (YardSiteLog.debugEnabled() && now >= nextLogAt) {
             nextLogAt = now + 2000L;
             int frames = frameCountSinceLog;
-            System.out.println("[yardsite] 沙盘(" + field.label() + ")：柱子 " + readyColumns
+            long gcCount = gcTotal();
+            long gcTime = gcMillis();
+            YardSiteLog.debug("沙盘(" + field.label() + ")：柱子 " + readyColumns
                     + "/" + columns * columns + "，宽度 ×"
                     + String.format(java.util.Locale.ROOT, "%.2f", widthScale) + "，四边形 " + quads
                     + "，顶点 " + (quads * 4) + "，每帧建模 " + (buildNs / 1_000_000L) + " ms"

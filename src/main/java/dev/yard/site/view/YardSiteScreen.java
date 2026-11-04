@@ -1,5 +1,6 @@
 package dev.yard.site.view;
 
+import dev.yard.site.YardSiteLog;
 import dev.yard.site.YardSiteConfig;
 import dev.yard.site.worldgen.SiteSelection;
 import net.minecraft.client.gui.GuiGraphics;
@@ -162,7 +163,7 @@ public class YardSiteScreen extends Screen {
     private int selectedZ;
 
     public YardSiteScreen(CreateWorldScreen parent, WorldCreationContext context, Runnable onProceed) {
-        super(Component.literal(SiteText.screenTitle()));
+        super(SiteText.screenTitle());
         this.parent = parent;
         this.context = context;
         this.onProceed = onProceed;
@@ -173,7 +174,7 @@ public class YardSiteScreen extends Screen {
         this.detailWidth = SiteEditorPrefs.detailWidth();
         terrain.setWidthScale(detailMode ? detailWidth : sandboxWidth);
         this.worker = CompletableFuture.runAsync(this::sampleInBackground, samplerExecutor);
-        System.out.println("[yardsite] 打开群系选区图：种子 " + context.options().seed()
+        YardSiteLog.debug("打开群系选区图：种子 " + context.options().seed()
                 + "，范围 ±" + radius + " 格");
     }
 
@@ -183,20 +184,20 @@ public class YardSiteScreen extends Screen {
         try (SiteMapSampler sampler = new SiteMapSampler(context, radius)) {
             SiteMapSampler.View view = sampler.view();
             results.add(view);
-            System.out.println("[yardsite] 选址图初始化（生成器/噪声）："
+            YardSiteLog.debug("选址图初始化（生成器/噪声）："
                     + (System.currentTimeMillis() - started) + " ms，从中心 "
                     + view.centerX + "," + view.centerZ + " 向外采样");
             long buildStart = System.currentTimeMillis();
             sampler.build(() -> cancelled);
             if (cancelled) return;
-            System.out.println("[yardsite] 选址图 256×256 采完：+"
+            YardSiteLog.debug("选址图 256×256 采完：+"
                     + (System.currentTimeMillis() - buildStart) + " ms（累计 "
                     + (System.currentTimeMillis() - started) + " ms）");
         } catch (Throwable t) {
             if (!cancelled) {
                 Throwable cause = t.getCause() == null ? t : t.getCause();
                 sampleError = cause.getMessage() == null ? cause.toString() : cause.getMessage();
-                System.out.println("[yardsite] 选址图采样失败：" + cause);
+                YardSiteLog.warn("选址图采样失败：" + cause);
             }
         }
     }
@@ -224,24 +225,32 @@ public class YardSiteScreen extends Screen {
         int right = this.width - 10;
         // 大沙盘不给直接创建：先落到区块精读（一格 = 一个区块）把落点钉准，创建只在精读里点
         if (detailMode) {
-            right = addButtonRight(right, y, 120, "确认并创建", b -> proceed());
-            right = addButtonRight(right, y, 76, "返回大沙盘", b -> backToSandbox());
+            right = addButtonRight(right, y, 120, "yardsite.screen.button.create", b -> proceed());
+            right = addButtonRight(right, y, 76, "yardsite.screen.button.backToSandbox", b -> backToSandbox());
         } else if (sandbox != null) {
-            right = addButtonRight(right, y, 120, "进入区块精读", b -> enterDetailForCreate());
+            right = addButtonRight(right, y, 120, "yardsite.screen.button.detail", b -> enterDetailForCreate());
         }
-        right = addButtonRight(right, y, 68, "复位视角", b -> {
+        right = addButtonRight(right, y, 68, "yardsite.screen.button.resetView", b -> {
             SiteField field = active();
             if (field != null) terrain.resetView(field);
         });
         if (hasSelection) {
-            right = addButtonRight(right, y, 72, "清除选点", b -> clearSelection());
+            right = addButtonRight(right, y, 72, "yardsite.screen.button.clearSelection", b -> clearSelection());
         }
-        addButtonRight(right, y, 56, "返回", b -> goBack());
+        addButtonRight(right, y, 56, "yardsite.screen.button.back", b -> goBack());
     }
 
-    private int addButtonRight(int right, int y, int width, String text, Button.OnPress action) {
+    /**
+     * 从右往左放一颗按钮。
+     *
+     * <p>宽度取「最小宽度」和「文字宽度 + 16」里的大者：原来写死 120/76/68/72/56，中文刚好，
+     * 英文（长 1.5～2 倍）会顶出按钮。最小宽度按中文那套留着，中文界面看起来不变。
+     */
+    private int addButtonRight(int right, int y, int minWidth, String key, Button.OnPress action) {
+        Component text = Component.translatable(key);
+        int width = Math.max(minWidth, this.font.width(text) + 16);
         int x = right - width;
-        this.addRenderableWidget(Button.builder(Component.literal(text), action).bounds(x, y, width, 20).build());
+        this.addRenderableWidget(Button.builder(text, action).bounds(x, y, width, 20).build());
         return x - 6;
     }
 
@@ -289,7 +298,7 @@ public class YardSiteScreen extends Screen {
         terrain.shiftPan(-terrain.panX(), -terrain.panY());
         int center = field.fine() / 2;
         selectAt(center, center);
-        System.out.println("[yardsite] 进入区块精读：中心 " + blockX + "," + blockZ
+        YardSiteLog.debug("进入区块精读：中心 " + blockX + "," + blockZ
                 + "（区块 " + Math.floorDiv(blockX, 16) + "," + Math.floorDiv(blockZ, 16) + "）"
                 + "，窗口半径 " + ChunkSitePlanner.RADIUS + " 区块");
         rebuildButtons();
@@ -412,36 +421,49 @@ public class YardSiteScreen extends Screen {
         int centerX = this.width / 2;
         int centerY = this.height / 2;
         if (sampleError != null) {
-            drawCentered(g, "采样失败：" + sampleError, centerX, centerY - 20, 0xFFFF8A80);
-            drawCentered(g, "可以点「返回」换个设置，或回原版建世界界面",
+            drawCentered(g, tr("yardsite.screen.notice.failed", sampleError), centerX, centerY - 20, 0xFFFF8A80);
+            drawCentered(g, tr("yardsite.screen.notice.failedHint"),
                     centerX, centerY - 6, TEXT_SUB);
             return;
         }
-        drawCentered(g, "正在定位出生点…", centerX, centerY - 6, 0xFFE8E8F0);
+        drawCentered(g, tr("yardsite.screen.notice.locating"), centerX, centerY - 6, 0xFFE8E8F0);
     }
 
-    /** 左上角：标题 + 当前视图 + 操作说明。 */
+    /**
+     * 左上角：标题 + 当前视图 + 操作说明。
+     *
+     * <p>操作说明按可用宽度折行（英文比中文长得多，原来那一行会顶到屏幕外）：
+     * 折出来几行，编辑模式那句就往下顺几行，不重叠。
+     */
     private void drawTopLeft(GuiGraphics g) {
         SiteField field = active();
-        String title = SiteText.screenTitle()
-                + (detailMode ? " · 区块精读（一格 = 1 区块）" : " · 大沙盘");
-        g.drawString(this.font, title, 8, 6, GOLD, true);
-        String sub = "种子 " + context.options().seed()
-                + (detailMode ? "　·　窗口半径 " + ChunkSitePlanner.RADIUS + " 区块"
-                : "　·　覆盖 ±" + radius + " 格");
-        if (field != null) {
-            sub += "　·　中心 x=" + field.centerX() + ", z=" + field.centerZ();
-        }
+        g.drawString(this.font, tr(detailMode ? "yardsite.screen.title.detail" : "yardsite.screen.title.sandbox"),
+                8, 6, GOLD, true);
+        String center = field == null ? ""
+                : tr("yardsite.screen.sub.center", field.centerX(), field.centerZ());
+        String sub = detailMode
+                ? tr("yardsite.screen.sub.detail", context.options().seed(), ChunkSitePlanner.RADIUS, center)
+                : tr("yardsite.screen.sub.sandbox", context.options().seed(), radius, center);
         g.drawString(this.font, sub, 8, 18, TEXT_SUB, true);
-        String hint = detailMode
-                ? "左键拖动=转视角　右键拖动=挪窗口（越拖越补采，采过的不重算）　中键拖动=翻面　滚轮=缩放　左键单击=选定（钉在区块上）　R=复位"
-                : "左键拖动=转视角　右键拖动=平移　中键拖动=翻面　滚轮=缩放　左键单击=选定　双击=进入区块精读　R=复位";
-        g.drawString(this.font, hint, 8, 30, TEXT_HINT, true);
+
+        int maxWidth = Math.max(120, this.width - 20);
+        int y = 30;
+        List<String> hints = new ArrayList<>(3);
+        wrapLines(tr(detailMode ? "yardsite.screen.hint.detail" : "yardsite.screen.hint.sandbox"),
+                maxWidth, hints);
+        for (String line : hints) {
+            g.drawString(this.font, line, 8, y, TEXT_HINT, true);
+            y += 10;
+        }
         if (editMode) {
-            String editHint = eyedropper
-                    ? "编辑模式：左键点一格=选它那个群系去调色（不改选点）　ESC=放下吸管"
-                    : "编辑模式：按住 Alt 点一格也能取色　ESC=退出";
-            g.drawString(this.font, editHint, 8, 41, GOLD, true);
+            y += 1;
+            List<String> editHints = new ArrayList<>(2);
+            wrapLines(tr(eyedropper ? "yardsite.screen.hint.edit.pick" : "yardsite.screen.hint.edit.normal"),
+                    maxWidth, editHints);
+            for (String line : editHints) {
+                g.drawString(this.font, line, 8, y, GOLD, true);
+                y += 10;
+            }
         }
     }
 
@@ -460,15 +482,18 @@ public class YardSiteScreen extends Screen {
 
         String line;
         if (sampleError != null) {
-            line = "采样失败";
+            line = tr("yardsite.screen.progress.error");
         } else if (field == null) {
-            line = "正在准备数据…";
+            line = tr("yardsite.screen.progress.prepare");
         } else if (field.full()) {
-            line = (detailMode ? "区块采样完成" : "采样完成") + "　·　群系 " + field.biomes().size() + " 种";
+            line = tr(detailMode ? "yardsite.screen.progress.done.detail"
+                    : "yardsite.screen.progress.done.sandbox", field.biomes().size());
         } else {
-            line = (detailMode ? "补采 " : "采样 ") + done * 100 / total + "%　·　已用 "
-                    + Math.max(0L, (System.currentTimeMillis() - startedAt) / 1000L) + " 秒　·　群系 "
-                    + field.biomes().size() + " 种";
+            line = tr(detailMode ? "yardsite.screen.progress.running.detail"
+                            : "yardsite.screen.progress.running.sandbox",
+                    done * 100 / total,
+                    Math.max(0L, (System.currentTimeMillis() - startedAt) / 1000L),
+                    field.biomes().size());
         }
         int right = editMode ? barX - 4 : this.width - 14;
         drawTrimmedRight(g, line, right, 6, this.width / 2,
@@ -525,7 +550,8 @@ public class YardSiteScreen extends Screen {
         this.toggleRect[1] = 15;
         this.toggleRect[2] = toggleW;
         this.toggleRect[3] = 14;
-        chip(g, toggleX, 15, toggleW, 14, editMode ? "编辑模式：开" : "编辑模式",
+        chip(g, toggleX, 15, toggleW, 14,
+                tr(editMode ? "yardsite.editor.toggle.on" : "yardsite.editor.toggle"),
                 this::toggleEditMode, editMode);
         if (!editMode) return;
 
@@ -535,9 +561,9 @@ public class YardSiteScreen extends Screen {
         g.fill(panelX, panelY, panelX + PANEL_W, panelY + panelH, 0xE612141B);
         g.fill(panelX, panelY, panelX + PANEL_W, panelY + 1, 0x4DFFFFFF);
         int tabW = (PANEL_W - 14) / 2;
-        chip(g, panelX + 6, panelY + 4, tabW, 13, "视图参数", () -> panelTab = TAB_VIEW,
+        chip(g, panelX + 6, panelY + 4, tabW, 13, tr("yardsite.editor.tab.view"), () -> panelTab = TAB_VIEW,
                 panelTab == TAB_VIEW);
-        chip(g, panelX + 8 + tabW, panelY + 4, tabW, 13, "群系调色", () -> panelTab = TAB_COLOR,
+        chip(g, panelX + 8 + tabW, panelY + 4, tabW, 13, tr("yardsite.editor.tab.color"), () -> panelTab = TAB_COLOR,
                 panelTab == TAB_COLOR);
 
         if (panelTab == TAB_VIEW) {
@@ -552,30 +578,30 @@ public class YardSiteScreen extends Screen {
         int x = panelX + 8;
         int innerW = PANEL_W - 16;
         int bottom = panelY + panelH - 4;
-        g.drawString(this.font, "柱子宽度（只撑横向，高度不变）", x, y, GOLD, true);
+        drawTrimmed(g, tr("yardsite.editor.title.width"), x, y, innerW, GOLD);
         y += 12;
-        drawSlider(g, sandboxSliderRect, x, y, "大沙盘", sandboxWidth, detailMode);
+        drawSlider(g, sandboxSliderRect, x, y, tr("yardsite.editor.slider.sandbox"), sandboxWidth, detailMode);
         y += 24;
-        drawSlider(g, detailSliderRect, x, y, "区块精读", detailWidth, !detailMode);
+        drawSlider(g, detailSliderRect, x, y, tr("yardsite.editor.slider.detail"), detailWidth, !detailMode);
         y += 24;
         if (y + 10 <= bottom) {
-            g.drawString(this.font, detailMode ? "上面那根：回大沙盘才看得到"
-                    : "下面那根：进区块精读才看得到", x, y, TEXT_HINT, true);
+            drawTrimmed(g, tr(detailMode ? "yardsite.editor.widthHint.top"
+                    : "yardsite.editor.widthHint.bottom"), x, y, innerW, TEXT_HINT);
             y += 14;
         }
         if (y + 26 > bottom) return;
-        g.drawString(this.font, "工具", x, y, GOLD, true);
+        g.drawString(this.font, tr("yardsite.editor.tools"), x, y, GOLD, true);
         y += 12;
         int half = (innerW - 4) / 2;
-        chip(g, x, y, half, 14, "选择落点", () -> eyedropper = false, !eyedropper);
-        chip(g, x + half + 4, y, half, 14, "取群系调色", () -> eyedropper = true, eyedropper);
+        chip(g, x, y, half, 14, tr("yardsite.editor.tool.select"), () -> eyedropper = false, !eyedropper);
+        chip(g, x + half + 4, y, half, 14, tr("yardsite.editor.tool.pick"), () -> eyedropper = true, eyedropper);
         y += 18;
         if (y + 10 > bottom) return;
-        g.drawString(this.font, "按住 Alt 点地图 = 直接取色", x, y, TEXT_HINT, true);
+        drawTrimmed(g, tr("yardsite.editor.altHint"), x, y, innerW, TEXT_HINT);
         y += 13;
         int count = SiteEditorPrefs.customCount();
         if (y + 11 > bottom) return;
-        String title = "已改 " + count + " 种群系";
+        String title = tr("yardsite.editor.changed", count);
         g.drawString(this.font, title, x, y, TEXT_SUB, true);
         List<ResourceLocation> ids = SiteEditorPrefs.orderedIds();
         int chipX = Math.min(x + this.font.width(title) + 6, panelX + PANEL_W - 8 - 12 * 9);
@@ -597,12 +623,12 @@ public class YardSiteScreen extends Screen {
         }
         y += 15;
         if (count > 0 && y + 14 <= bottom) {
-            chip(g, x, y, 60, 14, "全部还原", () -> {
+            chip(g, x, y, 60, 14, tr("yardsite.editor.resetAll"), () -> {
                 SiteEditorPrefs.clearAll();
                 colorTarget = null;
                 terrain.setHighlightBiome(null);
             }, false);
-            g.drawString(this.font, "改完存进配置文件", x + 66, y + 3, TEXT_HINT, true);
+            drawTrimmed(g, tr("yardsite.editor.saved"), x + 66, y + 3, innerW - 66, TEXT_HINT);
         }
     }
 
@@ -611,9 +637,9 @@ public class YardSiteScreen extends Screen {
         int x = panelX + 8;
         int innerW = PANEL_W - 16;
         if (colorTarget == null) {
-            drawTrimmed(g, "还没选群系", x, y, innerW, TEXT_SUB);
-            drawTrimmed(g, "切到「视图参数」选吸管，", x, y + 12, innerW, TEXT_HINT);
-            drawTrimmed(g, "或直接按住 Alt 点地图上一格", x, y + 22, innerW, TEXT_HINT);
+            drawTrimmed(g, tr("yardsite.editor.color.none"), x, y, innerW, TEXT_SUB);
+            drawTrimmed(g, tr("yardsite.editor.color.noneHint1"), x, y + 12, innerW, TEXT_HINT);
+            drawTrimmed(g, tr("yardsite.editor.color.noneHint2"), x, y + 22, innerW, TEXT_HINT);
             return;
         }
         int natural = naturalRgb(colorTarget);
@@ -626,11 +652,11 @@ public class YardSiteScreen extends Screen {
         // 左边原版色、右边现在图上用的色，改完当场能对比
         g.fill(x, y, x + 22, y + 11, 0xFF000000 | natural);
         g.fill(x + 26, y, x + 48, y + 11, 0xFF000000 | shownRgb);
-        drawTrimmed(g, "原版 / 现在 #" + SiteEditorPrefs.hex(shownRgb), x + 52, y + 2,
+        drawTrimmed(g, tr("yardsite.editor.color.compare", SiteEditorPrefs.hex(shownRgb)), x + 52, y + 2,
                 innerW - 52, TEXT_SUB);
         y += 16;
         if (BiomePalette.isWaterBiome(colorTarget)) {
-            drawTrimmed(g, "水面：这个色当浅水，深水自动压暗", x, y, innerW, TEXT_HINT);
+            drawTrimmed(g, tr("yardsite.editor.color.water"), x, y, innerW, TEXT_HINT);
             y += 11;
         }
         // 取色方块能拿多少高度就拿多少（小 GUI 缩放时也别把按钮挤出去）
@@ -640,14 +666,14 @@ public class YardSiteScreen extends Screen {
         drawHueBar(g, x, y, innerW, 8);
         y += 13;
         int half = (innerW - 4) / 2;
-        chip(g, x, y, half, 14, "恢复原色", () -> {
+        chip(g, x, y, half, 14, tr("yardsite.editor.color.restore"), () -> {
             SiteEditorPrefs.clear(colorTarget);
             rgbToHsv(natural, hsvScratch);
             targetHue = hsvScratch[0];
             targetSat = hsvScratch[1];
             targetVal = hsvScratch[2];
         }, false);
-        chip(g, x + half + 4, y, half, 14, "关闭", () -> {
+        chip(g, x + half + 4, y, half, 14, tr("yardsite.editor.color.close"), () -> {
             colorTarget = null;
             terrain.setHighlightBiome(null);
             SiteEditorPrefs.save();
@@ -849,14 +875,14 @@ public class YardSiteScreen extends Screen {
         List<String> lines = new ArrayList<>();
         int hintFrom = Integer.MAX_VALUE;
         if (sampleError != null) {
-            wrapLines("采样失败，可以点「返回」换个设置，或回原版建世界界面", maxWidth, lines);
+            wrapLines(tr("yardsite.screen.bottom.failed"), maxWidth, lines);
         } else {
             wrapLines(selectionLine(), maxWidth, lines);
             SiteField field = active();
             if (field != null && !field.full()) {
                 hintFrom = lines.size();
-                wrapLines(detailMode ? "新区块还在补采，可以先把窗口拖过去"
-                        : "地形正在从中间往外长，现在就能转视角、能选点", maxWidth, lines);
+                wrapLines(tr(detailMode ? "yardsite.screen.bottom.sampling.detail"
+                        : "yardsite.screen.bottom.sampling.sandbox"), maxWidth, lines);
             }
         }
         // 整块贴着屏幕底部往上排：多出来的行往上长，不会压到右下角那排按钮
@@ -896,28 +922,28 @@ public class YardSiteScreen extends Screen {
     private String selectionLine() {
         SiteField field = active();
         if (!hasSelection || field == null) {
-            return detailMode
-                    ? "点一格 = 把" + SiteText.place() + "定在这个区块上；「返回大沙盘」可换地方"
-                    : "左键点一下 = 把" + SiteText.place() + "定在这一格；双击 = 进入区块精读；"
-                            + "「进入区块精读」= 落在标记处，没有标记就落在默认出生点";
+            return tr(detailMode ? "yardsite.screen.select.none.detail" : "yardsite.screen.select.none.sandbox",
+                    SiteText.place().getString());
         }
         int b = field.biomeIndexAtCell(selectedCellX, selectedCellY);
         List<BiomeInfo> biomes = field.biomes();
         if (b < 0 || b >= biomes.size()) {
             // 刚进精读、或窗口挪到还没采到的地方：那一格连群系都还没有，别去查调色板
-            return "落点 x=" + selectedX + " z=" + selectedZ + "　这一格还在采样…";
+            return tr("yardsite.screen.select.sampling", selectedX, selectedZ);
         }
         BiomeInfo biome = biomes.get(b);
         int height = field.surfaceAtCell(selectedCellX, selectedCellY);
         boolean water = height <= field.seaLevel();
         String prefix = detailMode
-                ? "区块 " + Math.floorDiv(selectedX, 16) + "," + Math.floorDiv(selectedZ, 16)
-                : "方块 x=" + selectedX + " z=" + selectedZ;
-        return prefix + "　落点 x=" + selectedX + " z=" + selectedZ
-                + "　群系 " + biomeName(biome.id()).getString()
-                + "　y≈" + height
-                + (water ? (SiteText.hasPlot() ? "（水域，建筑会把地板以下补实）" : "（水域，低于海平面）") : "")
-                + (detailMode ? "　·　创建时按这个区块定位，不再自动挪位" : "");
+                ? tr("yardsite.screen.select.prefix.detail",
+                        Math.floorDiv(selectedX, 16), Math.floorDiv(selectedZ, 16))
+                : tr("yardsite.screen.select.prefix.sandbox", selectedX, selectedZ);
+        String waterNote = water
+                ? tr(SiteText.hasPlot() ? "yardsite.screen.select.water.plot" : "yardsite.screen.select.water")
+                : "";
+        String exactNote = detailMode ? tr("yardsite.screen.select.exact") : "";
+        return tr("yardsite.screen.select.line", prefix, selectedX, selectedZ,
+                biomeName(biome.id()).getString(), height, waterNote, exactNote);
     }
 
     private void drawHover(GuiGraphics g, int mouseX, int mouseY) {
@@ -931,16 +957,18 @@ public class YardSiteScreen extends Screen {
         int blockZ = blockForCell(field, hoverCellY, false);
 
         List<String> lines = new ArrayList<>(3);
-        lines.add("群系：" + biomeName(biome.id()).getString());
+        lines.add(tr("yardsite.screen.hover.biome", biomeName(biome.id()).getString()));
         if (detailMode) {
-            lines.add("区块 " + Math.floorDiv(blockX, 16) + "," + Math.floorDiv(blockZ, 16)
-                    + "　方块 " + blockX + "," + blockZ);
+            lines.add(tr("yardsite.screen.hover.detail", Math.floorDiv(blockX, 16), Math.floorDiv(blockZ, 16),
+                    blockX, blockZ));
         } else {
-            lines.add("坐标 x=" + blockX + " z=" + blockZ);
+            lines.add(tr("yardsite.screen.hover.coords", blockX, blockZ));
         }
-        lines.add(height <= field.seaLevel() ? "高度约 y=" + height + "（水面）" : "高度约 y=" + height);
+        lines.add(height <= field.seaLevel()
+                ? tr("yardsite.screen.hover.height.water", height)
+                : tr("yardsite.screen.hover.height", height));
         if (editMode && eyedropper) {
-            lines.add("点一下 = 调这个群系的颜色");
+            lines.add(tr("yardsite.screen.hover.eyedropper"));
         }
 
         int w = 0;
@@ -963,6 +991,17 @@ public class YardSiteScreen extends Screen {
             // 模组群系没带中文翻译时只能退回名字本身（下划线换成空格，至少不是裸 ID）
             return Component.literal(key.getPath().replace('_', ' '));
         });
+    }
+
+    /**
+     * 界面上的一行字。
+     *
+     * <p>文案本体在 {@code assets/yardsite/lang/*.json}，代码里只出现译键；这里取的是
+     * 「当前语言解析后的字符串」—— 这套界面全是按 {@code font.width(String)} 排版的，
+     * 拿字符串比拿 {@link Component} 更好算宽度、折行。
+     */
+    private static String tr(String key, Object... args) {
+        return Component.translatable(key, args).getString();
     }
 
     private void drawTrimmed(GuiGraphics g, String text, int x, int y, int maxWidth, int color) {
@@ -1125,7 +1164,7 @@ public class YardSiteScreen extends Screen {
         if (b < 0 || b >= biomes.size()) return;
         BiomeInfo info = biomes.get(b);
         focusBiome(info.id(), info.rgb());
-        System.out.println("[yardsite] 选址取色：" + info.id() + " 现色 #"
+        YardSiteLog.debug("选址取色：" + info.id() + " 现色 #"
                 + SiteEditorPrefs.hex(naturalRgb(info.id())));
     }
 
@@ -1187,7 +1226,7 @@ public class YardSiteScreen extends Screen {
         SiteSelection.setPass(parent, seed);
         // 只有精读里能走到这里，落点必定钉在区块上，服务端不再就近挪位
         SiteSelection.offer(selectedX, selectedZ, seed, true);
-        System.out.println("[yardsite] 选址确认：x=" + selectedX + ", z=" + selectedZ
+        YardSiteLog.debug("选址确认：x=" + selectedX + ", z=" + selectedZ
                 + "，按区块精确定位，种子 " + seed);
         handoffToReveal();
         cancelled = true;

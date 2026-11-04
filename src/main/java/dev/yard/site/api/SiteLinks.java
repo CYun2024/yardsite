@@ -1,5 +1,6 @@
 package dev.yard.site.api;
 
+import dev.yard.site.YardSiteLog;
 import net.neoforged.fml.ModList;
 import org.jetbrains.annotations.Nullable;
 
@@ -23,7 +24,7 @@ public final class SiteLinks {
     public static void register(SiteLink implementation) {
         link = implementation;
         resolved = true;
-        System.out.println("[yardsite] 已接入联动：" + implementation.id()
+        YardSiteLog.debug(() -> "已接入联动：" + implementation.id()
                 + "（选址结果按「" + implementation.placeLabel() + "」处理）");
     }
 
@@ -47,7 +48,7 @@ public final class SiteLinks {
             Class<?> bridge = Class.forName("dev.yard.core.compat.CoreSiteLink");
             bridge.getMethod("install").invoke(null);
         } catch (Throwable t) {
-            System.out.println("[yardsite] 检测到 yardcore 但联动没接上（" + t + "），按独立模式运行");
+            YardSiteLog.warn("检测到 yardcore 但联动没接上（" + t + "），按独立模式运行");
         }
     }
 }

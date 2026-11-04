@@ -1,5 +1,6 @@
 package dev.yard.site.client;
 
+import dev.yard.site.YardSiteLog;
 import dev.yard.site.YardSite;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -69,7 +70,7 @@ public final class ChunkLoadDiagnostics {
             originChunkX = mc.player.chunkPosition().x;
             originChunkZ = mc.player.chunkPosition().z;
             lastCheckAt = now;
-            System.out.println("[yardsite] 加载计时：进入世界"
+            YardSiteLog.debug("加载计时：进入世界"
                     + (runCreateAtMs > 0L ? "（点创建后 " + (loginAtMs - runCreateAtMs) + " ms）" : "")
                     + "，客户端视距 " + mc.options.renderDistance().get() + " 区块，原点 chunk "
                     + originChunkX + "," + originChunkZ);
@@ -102,7 +103,7 @@ public final class ChunkLoadDiagnostics {
             for (int i = 0; i < MILESTONES.length; i++) {
                 if (MILESTONES[i] == r && !done[i] && sum >= total) {
                     done[i] = true;
-                    System.out.println("[yardsite] 加载计时：半径 " + r + "（" + (2 * r + 1) + "×"
+                    YardSiteLog.debug("加载计时：半径 " + r + "（" + (2 * r + 1) + "×"
                             + (2 * r + 1) + "）客户端编译完，登录后 " + (now - loginAtMs) + " ms"
                             + (runCreateAtMs > 0L ? "，点创建后 " + (now - runCreateAtMs) + " ms" : ""));
                 }
@@ -111,7 +112,7 @@ public final class ChunkLoadDiagnostics {
 
         if (now - loginAtMs >= CAP_MS) {
             capped = true;
-            System.out.println("[yardsite] 加载计时：已等 " + (now - loginAtMs)
+            YardSiteLog.debug("加载计时：已等 " + (now - loginAtMs)
                     + " ms，最大完整半径 " + largest + "，半径 3/6/12 已编译 "
                     + countWithin(readyByDistance, 3) + "/" + (7 * 7) + "、"
                     + countWithin(readyByDistance, 6) + "/" + (13 * 13) + "、"

@@ -18,8 +18,21 @@ public interface SiteLink {
     /** 联动方 modid（日志用）。 */
     String id();
 
-    /** 地点叫什么：联动时是"庭院"，独立安装由本 mod 显示"出生点"。 */
+    /** 地点叫什么（只用于日志；界面上的叫法见 {@link #placeLabelKey()}）。 */
     String placeLabel();
+
+    /**
+     * 界面上的地点叫法：一个译键。
+     *
+     * <p>单独给一个键、而不是把 {@link #placeLabel()} 改成 {@code Component}，是为了<b>不破坏已经发出去的
+     * 联动实现</b>：老版本（yardcore 0.1.0）不实现这个方法也能跑，默认就是「庭院」。
+     *
+     * <p>键可以放在 <b>yardsite</b> 的 {@code lang/*.json} 里 —— 客户端会把所有命名空间的 lang 合起来读；
+     * 联动方想用别的词（旅社、营地…）就覆盖这个方法，并把条目加进自己的 lang。
+     */
+    default String placeLabelKey() {
+        return "yardsite.place.plot";
+    }
 
     /**
      * 是否要在创建世界时弹这张图（对应联动方自己的开关，例如「开局自动生成旅社」关掉时不弹）。

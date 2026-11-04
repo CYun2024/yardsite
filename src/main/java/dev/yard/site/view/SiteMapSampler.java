@@ -1,5 +1,6 @@
 package dev.yard.site.view;
 
+import dev.yard.site.YardSiteLog;
 import dev.yard.site.compat.TerraBlenderCompat;
 import dev.yard.site.worldgen.SurfaceProbe;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationContext;
@@ -352,7 +353,7 @@ public final class SiteMapSampler implements AutoCloseable {
             thread.setPriority(Thread.NORM_PRIORITY - 2);
             return thread;
         });
-        System.out.println("[yardsite] 选址图采样线程：" + threads + SiteThreadBudget.describe(threads)
+        YardSiteLog.debug("选址图采样线程：" + threads + SiteThreadBudget.describe(threads)
                 + "，高度网格：" + HEIGHT_RES + "×" + HEIGHT_RES + "（从中心向外）"
                 + "，竖直扫描 " + minY + ".." + (minY + Math.min(dimension.height(),
                 SurfaceProbe.SHALLOW_HEIGHT) - 1)
@@ -395,7 +396,7 @@ public final class SiteMapSampler implements AutoCloseable {
                 ? String.format(java.util.Locale.ROOT, "，CPU %d ms（平均 %.1f 核）",
                 cpuNanos / 1_000_000L, cpuNanos / 1_000_000.0 / ms)
                 : "";
-        System.out.println("[yardsite] 选址图中心向外采样：" + ms + " ms（"
+        YardSiteLog.debug("选址图中心向外采样：" + ms + " ms（"
                 + throughput(HEIGHT_POINTS, ms) + " 点/秒，跳过水域 " + skipped.get() + " 点）"
                 + cpuInfo + "；地块 " + readyBlocks() + "/" + HEIGHT_POINTS
                 + "，群系 " + view.palette.size() + " 种");

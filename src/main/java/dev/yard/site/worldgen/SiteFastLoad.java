@@ -1,5 +1,6 @@
 package dev.yard.site.worldgen;
 
+import dev.yard.site.YardSiteLog;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.GameRules;
@@ -36,7 +37,7 @@ public final class SiteFastLoad {
     public static void arm(ServerLevel serverLevel, int intendedRadius) {
         level = serverLevel;
         spawnChunkRadius = intendedRadius;
-        System.out.println("[yardsite] 早进世界：加载期出生点区块半径按 " + LOAD_RADIUS
+        YardSiteLog.debug("早进世界：加载期出生点区块半径按 " + LOAD_RADIUS
                 + " 放行登录（等 " + ((LOAD_RADIUS * 2 + 1) * (LOAD_RADIUS * 2 + 1)) + " 个区块），"
                 + "ServerStartedEvent 恢复为 " + intendedRadius);
     }
@@ -64,7 +65,7 @@ public final class SiteFastLoad {
         // prepareLevels 当时按 LOAD_RADIUS 加的 START ticket 半径不对，这里按正式半径再调一次：
         // remove 旧 ticket / add 新 ticket 都由原版 setDefaultSpawnPos 自己做。
         serverLevel.setDefaultSpawnPos(spawn, serverLevel.getSharedSpawnAngle());
-        System.out.println("[yardsite] 早进世界：出生点区块半径恢复为 " + radius
+        YardSiteLog.debug("早进世界：出生点区块半径恢复为 " + radius
                 + "（START ticket 半径 " + (radius + 1) + "），剩下的区块从现在开始补生成");
     }
 

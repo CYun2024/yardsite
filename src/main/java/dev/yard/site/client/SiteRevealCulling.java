@@ -1,5 +1,6 @@
 package dev.yard.site.client;
 
+import dev.yard.site.YardSiteLog;
 import dev.yard.site.view.SiteRevealScreen;
 
 /**
@@ -25,7 +26,7 @@ public final class SiteRevealCulling {
         boolean active = SiteRevealScreen.cullingActive();
         if (active && !announced) {
             announced = true;
-            System.out.println("[yardsite] Sodium 区块渲染过滤已接管：还没轮到的区块不提交绘制");
+            YardSiteLog.debug("Sodium 区块渲染过滤已接管：还没轮到的区块不提交绘制");
         } else if (!active) {
             announced = false;
         }

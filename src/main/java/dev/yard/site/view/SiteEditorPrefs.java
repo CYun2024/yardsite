@@ -1,5 +1,6 @@
 package dev.yard.site.view;
 
+import dev.yard.site.YardSiteLog;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
@@ -68,7 +69,7 @@ final class SiteEditorPrefs {
                     }
                 }
             } catch (Exception e) {
-                System.out.println("[yardsite] 读取选址配色 " + FILE + " 失败，用默认配色：" + e);
+                YardSiteLog.warn("读取选址配色 " + FILE + " 失败，用默认配色：" + e);
             }
             bump(null);
         }
@@ -85,7 +86,7 @@ final class SiteEditorPrefs {
             COLORS.put(id, rgb);
             ORDER.add(id);
         }
-        System.out.println("[yardsite] 选址自定义群系颜色：载入 " + ORDER.size() + " 种");
+        YardSiteLog.debug("选址自定义群系颜色：载入 " + ORDER.size() + " 种");
     }
 
     /** 写盘（拖动滑条/取色方块期间不用每次调，松手再调一次）。 */
@@ -103,7 +104,7 @@ final class SiteEditorPrefs {
             Files.createDirectories(FILE.getParent());
             Files.writeString(FILE, GSON.toJson(root), StandardCharsets.UTF_8);
         } catch (IOException e) {
-            System.out.println("[yardsite] 写选址配色 " + FILE + " 失败：" + e);
+            YardSiteLog.warn("写选址配色 " + FILE + " 失败：" + e);
         }
     }
 

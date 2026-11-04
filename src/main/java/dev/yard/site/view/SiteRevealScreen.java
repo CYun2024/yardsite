@@ -1,5 +1,6 @@
 package dev.yard.site.view;
 
+import dev.yard.site.YardSiteLog;
 import dev.yard.site.client.ChunkLoadDiagnostics;
 import dev.yard.site.client.RevealCinematics;
 import dev.yard.site.api.SiteLink;
@@ -189,7 +190,7 @@ public class SiteRevealScreen extends Screen {
     private static SiteRevealScreen active;
 
     SiteRevealScreen(SiteRevealHandoff.Payload payload) {
-        super(Component.literal(SiteText.revealTitle("进入世界")));
+        super(SiteText.revealTitle(SiteText.Stage.ENTER));
         this.planner = payload.planner;
         this.relief = new SiteReliefField(planner, payload.siteX, payload.siteZ);
         this.field = relief;
@@ -209,7 +210,7 @@ public class SiteRevealScreen extends Screen {
             this.blueprint = blueprintOf(plan);
             this.blueprintAt = openedAt + SiteRevealWorldRenderer.INTRO_MS;
         }
-        System.out.println("[yardsite] 落成动画开始：落点 x=" + siteX + " z=" + siteZ
+        YardSiteLog.debug("落成动画开始：落点 x=" + siteX + " z=" + siteZ
                 + "，开场接着精读那张图往透视推"
                 + (plan == null ? "（等真实落点）" : ""));
     }
@@ -287,14 +288,14 @@ public class SiteRevealScreen extends Screen {
 
     private void advance(long now) {
         if (now - openedAt >= HARD_CAP_MS) {
-            System.out.println("[yardsite] 落成动画撞到总上限，直接收场");
+            YardSiteLog.debug("落成动画撞到总上限，直接收场");
             finish();
             return;
         }
         SitePlan plan = SiteRevealState.plan();
         if (plan == null) {
             if (now - openedAt > NO_PLAN_MS) {
-                System.out.println("[yardsite] 一直没读到选址计划，直接收场");
+                YardSiteLog.debug("一直没读到选址计划，直接收场");
                 finish();
                 return;
             }
@@ -304,7 +305,7 @@ public class SiteRevealScreen extends Screen {
             world.retargetPlan(plan);
             blueprint = blueprintOf(plan);
             blueprintAt = now;
-            System.out.println("[yardsite] 读到服务端落点：" + (plan.hasPlot() ? "占地中心" : "出生点")
+            YardSiteLog.debug("读到服务端落点：" + (plan.hasPlot() ? "占地中心" : "出生点")
                     + " x=" + plan.plotCenterX()
                     + " z=" + plan.plotCenterZ() + (blueprint == null ? "" : "，线框开始生长"));
         }
@@ -312,7 +313,7 @@ public class SiteRevealScreen extends Screen {
             loginAt = now;
             ChunkLoadDiagnostics.markLoginAt(now);
             applyInvulnerability(this.minecraft);
-            System.out.println("[yardsite] 客户端有世界了（点创建后 " + (now - openedAt) + " ms），交给真世界");
+            YardSiteLog.debug("客户端有世界了（点创建后 " + (now - openedAt) + " ms），交给真世界");
         }
         world.tick(this.minecraft, now);
         if (descendAt != 0L) {
@@ -326,7 +327,7 @@ public class SiteRevealScreen extends Screen {
         if (loginAt != 0L && aerialAt == 0L) {
             aerialAt = now;
             RevealCinematics.setAerial(true);
-            System.out.println("[yardsite] 真世界接管相机（点创建后 " + (now - openedAt) + " ms）");
+            YardSiteLog.debug("真世界接管相机（点创建后 " + (now - openedAt) + " ms）");
         }
         if (aerialAt != 0L && descendAt == 0L) {
             // 每帧都试着把人放到位：建筑是进世界之后才盖的，盖完那一刻之前走廊还站不住，一帧定生死会直接跳过
@@ -349,7 +350,7 @@ public class SiteRevealScreen extends Screen {
                     collapseAt = now;
                     world.beginCollapse();
                     long settle = allReadyAt == 0L ? 0L : now - allReadyAt;
-                    System.out.println("[yardsite] 等待圈已露真地形（" + world.ready() + "/" + world.total()
+                    YardSiteLog.debug("等待圈已露真地形（" + world.ready() + "/" + world.total()
                             + "，半径 " + world.waitRadius() + " 区块，" + world.revealReport()
                             + (timeout ? "，等到上限" : "")
                             + "，门口那片" + (gateAreaReady ? "已上屏"
@@ -361,12 +362,12 @@ public class SiteRevealScreen extends Screen {
                 descendAt = now;
                 descendLastAt = now;
                 prepareDescent();
-                System.out.println("[yardsite] 沙盘散完，开始落机（点创建后 " + (now - openedAt) + " ms）");
+                YardSiteLog.debug("沙盘散完，开始落机（点创建后 " + (now - openedAt) + " ms）");
             }
         }
         if (descendAt != 0L && descendClockMs >= descendMs) {
             reportDescend();
-            System.out.println("[yardsite] 落成动画结束：镜头已交回玩家（点创建后 "
+            YardSiteLog.debug("落成动画结束：镜头已交回玩家（点创建后 "
                     + (now - openedAt) + " ms）");
             finish();
         }
@@ -379,7 +380,7 @@ public class SiteRevealScreen extends Screen {
     private void reportDescend() {
         if (descendFrames <= 0L) return;
         float fps = descendFrames * 1000.0F / Math.max(1.0F, descendClockMs);
-        System.out.println("[yardsite] 落机统计：" + descendFrames + " 帧 / " + Math.round(descendClockMs)
+        YardSiteLog.debug("落机统计：" + descendFrames + " 帧 / " + Math.round(descendClockMs)
                 + " ms（平均 " + String.format(java.util.Locale.ROOT, "%.1f", fps) + " 帧/秒），"
                 + "最大帧间隔 " + descendMaxGapMs + " ms，本屏最大 "
                 + (descendMaxFrameNs / 1_000_000L) + " ms（其中沙盘 "
@@ -425,7 +426,7 @@ public class SiteRevealScreen extends Screen {
             self.connection.teleport(door.getX() + 0.5, door.getY(), door.getZ() + 0.5, 0.0F, 0.0F);
         });
         placedInCorridor = true;
-        System.out.println("[yardsite] 落机前把玩家放回出生点 " + door.toShortString()
+        YardSiteLog.debug("落机前把玩家放回出生点 " + door.toShortString()
                 + "（原来在 " + mc.player.blockPosition().toShortString() + "）");
     }
 
@@ -509,7 +510,7 @@ public class SiteRevealScreen extends Screen {
             if (i > 0) note.append(" / ");
             note.append(Math.round(lengths[i]));
         }
-        System.out.println("[yardsite] 落机路径：" + pathNote + "，眼高 y=" + fmt(eyeY)
+        YardSiteLog.debug("落机路径：" + pathNote + "，眼高 y=" + fmt(eyeY)
                 + "，行程 " + Math.round(aerial.distanceTo(eyeAtSpawn)) + " 格"
                 + "（各段 " + note + "）→ 用时 " + fmt(descendMs / 1000.0F) + " 秒，节点 "
                 + fmt(pathKnots[1]) + (segments > 2 ? "/" + fmt(pathKnots[2]) : ""));
@@ -796,7 +797,9 @@ public class SiteRevealScreen extends Screen {
     private long diagGcCount;
     private long diagGcMillis;
 
+    /** 每帧的诊断：只在 {@code -Dyardsite.debug=true} 时跑，否则连 GC 计数都不查（这是每帧路径）。 */
     private void diagFrame(long frameStart, long advanceNs, long worldNs) {
+        if (!YardSiteLog.debugEnabled()) return;
         long frameNs = System.nanoTime() - frameStart;   // 本屏这一帧自己的渲染耗时
         long deltaNs = diagLastFrameStart == 0L ? 0L : frameStart - diagLastFrameStart;
         diagLastFrameStart = frameStart;
@@ -809,7 +812,7 @@ public class SiteRevealScreen extends Screen {
         diagMaxWorldNs = Math.max(diagMaxWorldNs, worldNs);
 
         if (deltaNs > 100_000_000L) {
-            System.out.println("[yardsite] 落成卡帧：" + (deltaNs / 1_000_000L) + " ms"
+            YardSiteLog.debug("落成卡帧：" + (deltaNs / 1_000_000L) + " ms"
                     + "（advance " + (advanceNs / 1_000_000L) + "，沙盘 " + (worldNs / 1_000_000L)
                     + "，柱子 " + (world != null ? world.lastCells() : 0)
                     + "，阶段 " + diagPhase() + "）");
@@ -821,7 +824,7 @@ public class SiteRevealScreen extends Screen {
         long frames = Math.max(1L, diagFrames);
         long gcCount = diagGcTotal();
         long gcMillis = diagGcMillis();
-        System.out.println("[yardsite] 落成帧：" + diagFrames + " 帧，本屏平均 "
+        YardSiteLog.debug("落成帧：" + diagFrames + " 帧，本屏平均 "
                 + (diagFrameNsSum / frames / 1_000_000L) + " ms / 最大 "
                 + (diagMaxFrameNs / 1_000_000L) + " ms；advance 平均 "
                 + (diagAdvanceNsSum / frames / 1_000_000L) + "/最大 " + (diagMaxAdvanceNs / 1_000_000L)
@@ -889,23 +892,28 @@ public class SiteRevealScreen extends Screen {
         }
     }
 
+    /** 界面上的一行字：文案本体在 {@code assets/yardsite/lang/*.json}（同 {@code YardSiteScreen#tr}）。 */
+    private static String tr(String key, Object... args) {
+        return Component.translatable(key, args).getString();
+    }
+
     private void drawInfo(GuiGraphics g) {
         SitePlan plan = SiteRevealState.plan();
         boolean linked = SiteText.linked();
-        g.drawString(this.font, SiteText.revealTitle(linked ? "施工蓝图" : "落点确认"), 8, 6, GOLD, true);
+        g.drawString(this.font, SiteText.revealTitle(SiteText.Stage.BLUEPRINT).getString(), 8, 6, GOLD, true);
         String sub;
         if (plan == null) {
-            sub = "正在准备世界…";
+            sub = tr("yardsite.reveal.info.prepare");
         } else if (linked && plan.hasPlot()) {
-            sub = "占地中心 x=" + plan.plotCenterX() + " z=" + plan.plotCenterZ()
-                    + "　·　" + (SiteRevealState.built() ? "建筑已落成" : "正在按蓝图搭建");
+            sub = tr("yardsite.reveal.info.plot", plan.plotCenterX(), plan.plotCenterZ(),
+                    tr(SiteRevealState.built() ? "yardsite.reveal.info.built" : "yardsite.reveal.info.building"));
         } else {
-            sub = "出生点 x=" + plan.spawnX() + " y=" + plan.spawnY() + " z=" + plan.spawnZ();
+            sub = tr("yardsite.reveal.info.spawn", plan.spawnX(), plan.spawnY(), plan.spawnZ());
         }
         g.drawString(this.font, sub, 8, 18, TEXT_SUB, true);
-        g.drawString(this.font, "ESC = 直接进入世界", 8, 30, TEXT_HINT, true);
+        g.drawString(this.font, tr("yardsite.reveal.info.escape"), 8, 30, TEXT_HINT, true);
         if (loginAt == 0L) {
-            g.drawString(this.font, "服务器正在生成出生点区块…", 8, this.height - 21, TEXT_HINT, true);
+            g.drawString(this.font, tr("yardsite.reveal.info.generating"), 8, this.height - 21, TEXT_HINT, true);
         }
     }
 
@@ -913,15 +921,15 @@ public class SiteRevealScreen extends Screen {
         int ready = world == null ? 0 : world.ready();
         int total = world == null ? 0 : world.total();
         int radius = world == null ? 0 : world.waitRadius();
-        g.drawString(this.font, SiteText.revealTitle("载入真实地形"), 8, 6, GOLD, true);
+        g.drawString(this.font, SiteText.revealTitle(SiteText.Stage.REVEAL).getString(), 8, 6, GOLD, true);
         String text;
         if (collapseAt != 0L) {
-            text = "收起沙盘…";
+            text = tr("yardsite.reveal.progress.collapse");
         } else if (ready >= total && total > 0) {
-            text = "真实地形已接管";
+            text = tr("yardsite.reveal.progress.ready");
         } else {
             // 分母是等待圈里的区块数（视距内 ±N 区块），不是整张 31×31 的沙盘
-            text = "真实地形载入中 " + ready + "/" + total + "（半径 " + radius + " 区块）";
+            text = tr("yardsite.reveal.progress.loading", ready, total, radius);
         }
         int barWidth = Math.min(280, this.width - 40);
         int x = (this.width - barWidth) / 2;

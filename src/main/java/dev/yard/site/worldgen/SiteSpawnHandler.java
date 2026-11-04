@@ -1,5 +1,6 @@
 package dev.yard.site.worldgen;
 
+import dev.yard.site.YardSiteLog;
 import dev.yard.site.YardSiteConfig;
 import dev.yard.site.api.SiteLink;
 import dev.yard.site.api.SiteLinks;
@@ -95,7 +96,7 @@ public final class SiteSpawnHandler {
         SiteRevealState.publish(plan);
         if (link != null) link.onPlanned(level, plan);
 
-        System.out.println("[yardsite] 选区接管出生点：" + describe(plan)
+        YardSiteLog.debug("选区接管出生点：" + describe(plan)
                 + "，出生点区块半径 " + chunkRadius + "（" + (chunkRadius * 2 + 1) + "×"
                 + (chunkRadius * 2 + 1) + " 个区块）"
                 + (early ? "，加载期先按 " + SiteFastLoad.LOAD_RADIUS + " 放行登录、进世界后再补生成"
@@ -119,7 +120,7 @@ public final class SiteSpawnHandler {
         if (surface <= level.getMinBuildHeight() || surface == spawn.getY()) return;
         level.setDefaultSpawnPos(new BlockPos(spawn.getX(), surface, spawn.getZ()),
                 level.getSharedSpawnAngle());
-        System.out.println("[yardsite] 出生点高度按真实地形修正：y " + spawn.getY() + " → " + surface);
+        YardSiteLog.debug("出生点高度按真实地形修正：y " + spawn.getY() + " → " + surface);
     }
 
     private static String describe(SitePlan plan) {

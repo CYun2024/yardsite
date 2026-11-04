@@ -1,5 +1,6 @@
 package dev.yard.site.view;
 
+import dev.yard.site.YardSiteLog;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import dev.yard.site.api.BlueprintBox;
@@ -404,7 +405,7 @@ final class SiteRevealWorldRenderer {
         }
         this.waitTotal = zone;
         recomputeWave();
-        System.out.println("[yardsite] 落机等待范围：中心 ±" + waitRadius + " 区块（" + waitTotal
+        YardSiteLog.debug("落机等待范围：中心 ±" + waitRadius + " 区块（" + waitTotal
                 + " 块；整张细场 " + chunkCols + "×" + chunkRows + "＝" + total
                 + " 块，视距 " + renderDistance + "）");
     }
@@ -435,7 +436,7 @@ final class SiteRevealWorldRenderer {
         // 缓存是按格子下标存的，下标换了一套含义，重头存
         java.util.Arrays.fill(preTop, TOP_UNSET);
         java.util.Arrays.fill(cellRgb, -1);
-        System.out.println("[yardsite] 落成开场接细场：开场进度 "
+        YardSiteLog.debug("落成开场接细场：开场进度 "
                 + String.format(java.util.Locale.ROOT, "%.2f", introEase)
                 + (revealClockStarted ? "（登录了）" : "（细场已经盖住整屏）"));
     }
@@ -552,11 +553,11 @@ final class SiteRevealWorldRenderer {
         }
         if (!meshGateAnnounced && sightings > 0) {
             meshGateAnnounced = true;
-            System.out.println("[yardsite] 落成让位判据：真实区块进了 Sodium 绘制列表才淡柱子");
+            YardSiteLog.debug("落成让位判据：真实区块进了 Sodium 绘制列表才淡柱子");
         }
         if (!noFilterAnnounced && sightings == 0 && revealClockMs > FILTER_PROBE_MS) {
             noFilterAnnounced = true;
-            System.out.println("[yardsite] 落成让位判据：没收到绘制列表回报（Sodium 过滤没挂上？），"
+            YardSiteLog.debug("落成让位判据：没收到绘制列表回报（Sodium 过滤没挂上？），"
                     + "退回「区块到货 + " + NO_FILTER_MESH_MS + " ms」放行");
         }
 
@@ -785,7 +786,7 @@ final class SiteRevealWorldRenderer {
             }
         }
         waiting = 0;
-        System.out.println("[yardsite] 沙盘收尾：还没放行的 " + removed + " 个区块列一起消散（"
+        YardSiteLog.debug("沙盘收尾：还没放行的 " + removed + " 个区块列一起消散（"
                 + COLLAPSE_MS + " ms，之后镜头再动）");
     }
 

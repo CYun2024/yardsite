@@ -1,5 +1,6 @@
 package dev.yard.site.view;
 
+import dev.yard.site.YardSiteLog;
 import dev.yard.site.compat.TerraBlenderCompat;
 import dev.yard.site.worldgen.SurfaceProbe;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationContext;
@@ -313,7 +314,7 @@ final class ChunkSitePlanner implements AutoCloseable {
         this.pump = new Thread(this::pumpLoop, "yard-site-chunk-pump");
         this.pump.setDaemon(true);
         this.pump.setPriority(Thread.NORM_PRIORITY - 2);
-        System.out.println("[yardsite] 区块精读：圆形窗口半径 " + RADIUS + " 区块（" + discCells
+        YardSiteLog.debug("区块精读：圆形窗口半径 " + RADIUS + " 区块（" + discCells
                 + " 格），线程 " + threads + SiteThreadBudget.describe(threads));
     }
 
@@ -407,7 +408,7 @@ final class ChunkSitePlanner implements AutoCloseable {
                 Thread.currentThread().interrupt();
                 return;
             } catch (Throwable t) {
-                System.out.println("[yardsite] 区块精读采样失败：" + t);
+                YardSiteLog.warn("区块精读采样失败：" + t);
                 return;
             }
         }
