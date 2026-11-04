@@ -82,6 +82,11 @@ Sodium is only needed at compile time for the optional culling hooks. Drop
 `sodium-neoforge-0.8.13+mc1.21.1-mod.jar` into `libs/` before building to include them; without it
 the build skips those classes and the mod still runs.
 
+## Credits
+
+Design, decisions and testing: CYun_CYER. Part of the code was written with AI assistants (DeepSeek,
+Qwen) and then reviewed, tested and edited by hand; the mod's behaviour is not generated at runtime.
+
 ## License
 
 MIT, see [LICENSE](LICENSE). Use it, change it, ship it, sell it, as long as the copyright notice
