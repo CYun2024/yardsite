@@ -1,121 +1,137 @@
 # Yard Site · 群系选区
 
-Pick the exact spot where your world begins — before the world exists.
+Choose where you spawn before the world is generated.
 
-**Yard Site** shows a 3D biome/terrain sandbox on the "Create New World" screen, lets you zoom down to a
-one-chunk-per-cell view, and pins your choice. The world is then created around that spot and you are
-dropped in through a short cinematic reveal instead of a loading bar.
+On the *Create New World* screen this mod draws a 3D map of the biomes and terrain around the
+spawn area. You can zoom down to one cell per chunk and click the cell you want; that spot becomes
+the centre of the new world. Instead of a loading bar there is a short camera move: the map tilts
+into perspective, the camera circles the site while nearby chunks load, the map dissolves, and the
+camera drops to your spawn point.
 
-Installed alone it simply **sets your spawn point**. Installed together with the *Yard* series it turns
-the same pick into a **building plot** (the yard mod plans the origin and draws its blueprint).
+If a Yard-series mod is installed, the same click selects a building plot instead of a bare spawn
+point. Nothing else changes.
 
----
+## How it works
 
-## English
+1. Click *Create New World* — the map appears. It is built from the worldgen noise on the client,
+   so no chunks are loaded. The world seed is used, which means modded biomes appear correctly
+   (TerraBlender is handled).
+2. Click a cell to place the marker. Double-click or press *Enter chunk view* to see one cell per
+   chunk; the marker snaps to a whole chunk there.
+3. Confirm. The vanilla loading screen is replaced by the camera sequence, and you land on the
+   chosen spot.
 
-### What it does
+## The two modes
 
-1. Click **Create New World** → a biome/terrain map of the area around the simulated spawn point appears.
-   Fully client-side: it samples the worldgen noise, no chunks are loaded.
-2. Zoom into **chunk view** (one cell = one chunk) and click the cell you want. The world seed is respected,
-   so what you see is what you get — including modded biomes (TerraBlender aware).
-3. Confirm → the vanilla loading screen is replaced by a reveal: the sandbox is pushed into perspective,
-   the camera slowly orbits while the spawn area loads, then the remaining sandbox dissolves at once and
-   the camera descends to your spawn point.
+**On its own** the chosen cell becomes your spawn point. After the spawn chunks load, the Y value is
+checked once against the real heightmap so you do not end up inside a tree.
 
-### Two modes
+**With the Yard series** (`yardcore` and friends) the cell becomes a yard plot. The Yard mod plans
+the building origin around it, puts the spawn inside the yard, and the camera sequence draws the
+building as a wireframe on the way down.
 
-| Installed with | What the pick becomes | Reveal |
+The link between the two is optional in both directions: this mod runs fine without the Yard mods,
+and they run fine without it.
+
+## Requirements
+
+- Minecraft 1.21.1, NeoForge 21.1.x, Java 21
+- No required dependencies
+- Sodium is optional. With it, real terrain stays hidden until each chunk column is actually being
+  drawn, so it cannot show through the map. Without it the hand-off still works, just a little rougher.
+- A Yard-series mod is optional (adds the plot + wireframe mode)
+
+## Config
+
+`config/yardsite-common.toml`:
+
+| Key | Default | What it does |
 |---|---|---|
-| Nothing else | your **spawn point** (Y is fixed up against the real heightmap after the spawn chunks load) | sandbox → above spawn → eye level, no blueprint |
-| The Yard series (`yardcore`) | a **yard plot**: origin planned around the pick, spawn inside the yard | sandbox → above the gate → through the doorway, with the building drawn as a golden wireframe |
+| `site.spawnSiteSelect` | `true` | show the map at all; `false` gives vanilla spawn behaviour |
+| `site.selectRadius` | `2000` | map size, ±N blocks around the spawn area |
+| `site.sampleThreads` | `0` | sampling threads; `0` = half the CPU cores |
+| `site.spawnChunkRadius` | `3` | spawn chunk radius kept loaded after you enter |
+| `site.earlyEntry` | `false` | log in early, keep generating chunks afterwards |
+| `site.revealAnim` | `true` | the camera sequence; `false` keeps the vanilla loading screen |
 
-The integration is optional and soft: this mod never hard-depends on anything, and the Yard mods never
-require this one.
+Biome colours changed in the in-game editor are saved to `config/yardsite/site_biome_colors.json`.
 
-### Requirements
+## Worth knowing
 
-- Minecraft **1.21.1**, NeoForge **21.1.x**, Java 21
-- **No required dependencies**
-- Optional: **Sodium** — improves the hand-off (the sandbox is culled per chunk column so real terrain
-  cannot peek through), but everything works without it
-- Optional: a *Yard* series mod for the plot/blueprint mode
+- Only for single-player and LAN world creation. Dedicated servers do not have this screen, so
+  nothing happens there.
+- While the camera sequence plays, this mod takes over the world-creation loading screen. If another
+  mod does the same, they may fight; set `site.revealAnim = false` to compare.
+- The map is drawn by the mod's own renderer. No assets from the base game or from other mods are
+  included.
 
-### Config — `config/yardsite-common.toml`
-
-| Key | Default | Meaning |
-|---|---|---|
-| `site.spawnSiteSelect` | `true` | show the map at all; `false` = vanilla spawn behaviour |
-| `site.selectRadius` | `2000` | map coverage, ±N blocks around the simulated spawn |
-| `site.sampleThreads` | `0` | sampling threads; `0` = half of the CPU cores |
-| `site.spawnChunkRadius` | `3` | spawn chunk radius kept loaded after entering the world |
-| `site.earlyEntry` | `false` | let you log in early and keep generating chunks afterwards |
-| `site.revealAnim` | `true` | the reveal cinematic; `false` = vanilla loading screen |
-
-Biome colours edited in-game are stored in `config/yardsite/site_biome_colors.json`.
-
-### Notes
-
-- Only applies to **single-player / LAN world creation**; dedicated servers have no such screen.
-- This mod **replaces the world-creation loading screen** while the reveal is playing. If another mod also
-  takes over that screen, they may conflict — turn `site.revealAnim` off to compare.
-- The sandbox is drawn with the mod's own renderer; nothing from the base game or any other mod is bundled.
-
-### Build from source
+## Build
 
 ```bash
-# 1. (optional) drop sodium-neoforge-0.8.13+mc1.21.1-mod.jar into libs/
-# 2. build
-./gradlew build
-# jar → build/libs/yardsite-<version>.jar
+./gradlew build                  # jar → build/libs/yardsite-<version>.jar
+./gradlew runClient              # dev client
 ```
 
-`./gradlew runClient` opens a dev client if you want to try it in-game.
+Sodium is only needed at compile time for the optional culling hooks. Put
+`sodium-neoforge-0.8.13+mc1.21.1-mod.jar` in `libs/` before building if you want them; without it
+the build skips those classes and the mod still works.
 
-### License
+## License
 
-MIT — see [LICENSE](LICENSE). No warranty. You may use, modify, redistribute and sell it; just keep the
-copyright notice.
+MIT, see [LICENSE](LICENSE). Use it, change it, ship it, sell it — just keep the copyright notice.
 
 ---
 
-## 中文
+# 中文
 
-### 这是什么
+在生成世界之前选好出生点。
 
-建新世界的时候，先把出生点周围的地形和群系画成一张**三维沙盘**，让你把落点定在具体的那一格上，
-再随一段落成镜头进世界，而不是对着加载条等。
+点「创建世界」时会先出现一张三维的群系/地形图，可以放大到一格 = 一个区块，点哪一格，新世界就
+围着哪一格生成。之后不是加载条，而是一段镜头：地图推成透视、绕着落点转一圈，附近的区块加载完
+之后地图散掉，镜头落到出生点上。
 
-- 只装这一个 mod：选出来的就是**出生点**（进世界后按真实高度图再校一次 y，避免落进树里）。
-- 和庭院系列一起装：同一个落点变成**庭院占地**（庭院那边负责规划建筑原点，落成动画会画出旅社的金色线框）。
+如果装了庭院系列，同一次点击选出来的是庭院占地，不是单纯的出生点。其它没有区别。
 
-### 怎么用
+## 用法
 
-1. 点「创建世界」→ 出现出生点附近 ±N 格的地形/群系沙盘（纯客户端采样，不加载区块，支持改群系的 mod）；
-2. 左键点一格选定，双击或点「进入区块精读」看一格 = 一区块的细节；
-3. 点「确认并创建」→ 沙盘推成透视、镜头缓慢绕着落点转，等视距内真实地形到位后沙盘一次性散掉，镜头落到出生点。
+1. 点「创建世界」。地图是用世界生成的噪声在客户端算出来的，不加载区块，种子按你设的那个走，
+   所以改群系的 mod 也能正确显示（TerraBlender 已兼容）。
+2. 点一格放标记。双击或点「进入区块精读」可以看一格 = 一区块的细节，落点会钉在整区块上。
+3. 点「确认并创建」，看完镜头就落在选好的地方。
 
-### 要求
+## 两种装法
 
-- Minecraft 1.21.1 / NeoForge 21.1.x / Java 21；
-- **没有必需前置**；
-- Sodium 可选（装了更稳，没装也能用）；庭院系列可选（装了才有庭院占地与蓝图）。
+**只装这一个**：选中的那一格就是出生点。出生点区块加载完之后，会按真实高度图再校一次 y，
+免得落在树里。
 
-### 配置
+**和庭院系列一起装**：这一格变成庭院占地，庭院那边负责规划建筑原点、把出生点放进院内，
+落成镜头会顺路把建筑画成金色线框。
 
-`config/yardsite-common.toml`，`site.*` 六个开关（是否弹图、覆盖范围、采样线程、出生点区块半径、
-早进世界、落成动画）。调过的群系颜色存在 `config/yardsite/site_biome_colors.json`。
+两边都不硬依赖：没有庭院系列它能单独跑，没有它庭院系列也照常跑。
 
-### 注意
+## 要求
 
-- 只对**单人/局域网建世界**生效，专用服务器没有这一步；
-- 落成动画期间会**接管原版建世界的加载界面**，和其它改加载界面的 mod 可能冲突（`site.revealAnim=false` 可关）；
-- 包里不含任何游戏素材或第三方 mod 的代码。
+- Minecraft 1.21.1 / NeoForge 21.1.x / Java 21
+- 没有必需前置
+- Sodium 可选：装了以后真实地形要等所在区块列真的在画才露出来，不会从地图缝里透出来；
+  没装也能用，只是接缝处理粗一点
+- 庭院系列可选（才有占地和线框）
 
-### 许可
+## 配置
+
+`config/yardsite-common.toml`：是否弹图、地图范围、采样线程数、出生点区块半径、早进世界、
+落成镜头。界面里调过的群系颜色存在 `config/yardsite/site_biome_colors.json`。
+
+## 注意
+
+- 只对单人/局域网建世界生效，专用服务器没有这一步；
+- 镜头期间会接管原版建世界的加载界面，和其它改加载界面的 mod 可能冲突（`site.revealAnim=false` 可关）；
+- 包里不含任何游戏素材，也不含第三方 mod 的代码。
+
+## 许可
 
 MIT，见 [LICENSE](LICENSE)。
 
 ---
 
-作者 / Author: **CYun_CYER**（Modrinth: CYun2024）
+作者：**CYun_CYER**（Modrinth: CYun2024）
