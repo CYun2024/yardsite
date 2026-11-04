@@ -1,0 +1,13 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "dev.yard.site.mixin.sodium",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "ChunkRenderListMixin",
+    "SodiumWorldRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.yard.site.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "CreateWorldScreenMixin",
+    "CreateWorldScreenAccessor",
+    "MinecraftSiteLoadMixin",
+    "WorldOpenFlowsMixin",
+    "CameraMixin",
+    "GameRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
