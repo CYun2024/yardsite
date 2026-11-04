@@ -46,8 +46,11 @@ import net.minecraft.world.phys.Vec3;
  *   <li>柱顶<b>一动不动</b>：从头到尾都用预读到的那一份地面高度，淡出期间不再滑到真实地表高度。
  *       以前那一滑（含树和旅社的 {@code WORLD_SURFACE}）看着就是"柱子往上长一边散掉"，像往上飘。
  *       真实地形（树、屋顶、更高的地面）是在柱子下面直接显出来的。</li>
- *   <li>收尾判据：<b>没有一块还在排队等放行</b>、且最后开始淡的那块也淡完了才落机——
- *       不再是"让位时间用满"就跳走。</li>
+ *   <li>收尾判据：<b>只等视距内的等待圈</b>（中心 ±8~10 区块，见 {@link #waitRadius}）——圈内每一块都放行、
+ *       且最后开始淡的那块也淡完了，就可以落机；圈外那几百块（视距外，数据永远不来）不再吊着镜头。</li>
+ *   <li>落机前还有一步 <b>收尾消散</b>（{@link #beginCollapse()}）：剩下没轮到的柱子在同一时刻开始、
+ *       用 {@link #COLLAPSE_MS} 一起散干净，散完镜头才动——否则镜头一挪就会从还立着的柱子中间穿过去。</li>
+ *   <li>空中段镜头极缓地自转（{@link #DRIFT_YAW_DEG}）并带一点俯仰呼吸：等着区块的那几秒不是一张静止图。</li>
  * </ul>
  *
  * <p>不是原版世界空间渲染：柱子画在 GUI 批里，和真地形的深度不共享；柱子所在处就是还没露出的地方。
@@ -82,6 +85,38 @@ final class SiteRevealWorldRenderer {
      * 这是每一块<b>最早</b>能让位的时刻，真实网格到了才真的让。
      */
     private static final long REVEAL_SPREAD_MS = 8_000L;
+    /**
+     * 落机前<b>只等这一圈</b>真实区块露出来（区块半径，含中心）：默认就等于客户端视距。
+     *
+     * <p>细场整张是 31×31＝961 个区块列，而视距 12 的客户端最多只加载得到 25×25 —— 外面那一圈
+     * 永远等不到，以前就是被它们拖在天下十几秒（进度条分母 900+ 也是这么来的）。
+     * 现在只数这一小圈：视距 12 → 半径 12 → 25×25＝625 块，正好是视距内看得见的那一片。
+     *
+     * <p>为什么按视距而不是更小：半径比视距小一圈时，画面边缘那一圈还是沙盘的假地形，
+     * 落机时会"漏出来一点"再被真地形替掉，看着像闪。等满视距就不会有这道边。
+     * 上下限只防极端设置：视距太小（≤8）时按 8 等，视距再大也不超过 12（沙盘本身只有 ±15 区块）。
+     */
+    private static final int WAIT_RADIUS_MIN = 8;
+    private static final int WAIT_RADIUS_MAX = 12;
+    /**
+     * 等待圈内那一波让位的时长（毫秒）：从中心往外一圈圈走完，比整场的
+     * {@link #REVEAL_SPREAD_MS} 快得多，镜头不用在空中干等。
+     */
+    private static final long REVEAL_SPREAD_NEAR_MS = 2_200L;
+    /**
+     * 收尾「剩下的沙盘一次性消散」的时长（毫秒）。这段时间里镜头<b>不动</b>：
+     * 没轮到的柱子一起淡掉，散完再开始落机，不然镜头动起来时远处还立着一片柱子会穿帮。
+     */
+    static final int COLLAPSE_MS = 300;
+    /**
+     * 空中段镜头<b>朝一个方向</b>极缓地绕：{@value #DRIFT_DEG_PER_SEC}°/秒（一分钟约 90 度），
+     * 开场进度过半后才起转，最大累计 {@value #DRIFT_MAX_DEG} 度。
+     *
+     * <p>不用来回摆（正弦）：摆动的观感是"镜头在犹豫"，而且每经过中线都要反向一次，看着像抖。
+     * 单向慢绕就是一次很轻的环绕运动，落机时由 {@code lookBlend} 收回到玩家视线。
+     */
+    private static final float DRIFT_DEG_PER_SEC = 1.5F;
+    private static final float DRIFT_MAX_DEG = 18.0F;
     /** 透视那一头的名义视野：正交和透视在这一头交接，这个数只决定透视侧自己的成像大小。 */
     private static final float START_FOV = 15.0F;
     /** 空中机位距离：离院子远一些，院子整体在画面里，水平方向也拉开。 */
@@ -216,6 +251,14 @@ final class SiteRevealWorldRenderer {
     /** 每一块地形按离庭院中心的远近排出来的<b>最早</b>让位时刻（毫秒，相对动画时钟）。 */
     private final long[] waveAt;
     private final int total;
+    /** 落机前要等的区块半径（区块，含中心）。 */
+    private final int waitRadius;
+    /** 等待圈里有几个区块列（进度条的分母）。 */
+    private final int waitTotal;
+    /** 这个区块列在不在等待圈里：只有圈里的算进度、算"还没好"。 */
+    private final boolean[] waitZone;
+    /** 收尾整体消散的开始时刻（-1 = 还没开始）。 */
+    private long collapseAt = -1L;
     /** 预读的平台高度（一格算一次存着）：淡出期间柱顶不再变，所以只用这一份。 */
     private final int[] preTop;
     private final float[] cellAlpha;
@@ -250,6 +293,8 @@ final class SiteRevealWorldRenderer {
     private Vec3 eye = Vec3.ZERO;
     private float yaw;
     private float pitch;
+    /** 空中段累计绕了多少度（单向累加，收尾消散时停）。 */
+    private float orbitDeg;
     private float fov = START_FOV;
     private Vec3 look = new Vec3(0.0, 0.0, 1.0);
     private Vec3 right = new Vec3(-1.0, 0.0, 0.0);
@@ -341,7 +386,27 @@ final class SiteRevealWorldRenderer {
         this.waveAt = new long[total];
         this.fadeAt = new long[total];
         java.util.Arrays.fill(fadeAt, -1L);
+
+        // 等待圈：以细场中心区块为中心的方形（切比雪夫距离），默认按客户端视距来
+        int renderDistance = Minecraft.getInstance().options.renderDistance().get();
+        this.waitRadius = Mth.clamp(renderDistance, WAIT_RADIUS_MIN, WAIT_RADIUS_MAX);
+        this.waitZone = new boolean[total];
+        int centerChunkX = field.centerChunkX();
+        int centerChunkZ = field.centerChunkZ();
+        int zone = 0;
+        for (int row = 0; row < chunkRows; row++) {
+            for (int col = 0; col < chunkCols; col++) {
+                boolean in = Math.abs(chunkBaseX + col - centerChunkX) <= waitRadius
+                        && Math.abs(chunkBaseZ + row - centerChunkZ) <= waitRadius;
+                waitZone[row * chunkCols + col] = in;
+                if (in) zone++;
+            }
+        }
+        this.waitTotal = zone;
         recomputeWave();
+        System.out.println("[yardsite] 落机等待范围：中心 ±" + waitRadius + " 区块（" + waitTotal
+                + " 块；整张细场 " + chunkCols + "×" + chunkRows + "＝" + total
+                + " 块，视距 " + renderDistance + "）");
     }
 
     /** 开场画精读那张粗场：粗场的格子中心落在「图心 + (格序 − 半宽)·一步」上，所以再退半格。 */
@@ -433,7 +498,15 @@ final class SiteRevealWorldRenderer {
         fov = Mth.lerp(e, START_FOV, aerialFov);
         float k = (float) Math.exp(Mth.lerp(e, (float) Math.log(startK), (float) Math.log(endK)));
         float distance = k / (float) Math.tan(Math.toRadians(fov) * 0.5);
-        yaw = siteYaw;
+        // 空中段朝同一方向极缓地绕（不是来回摆），等着区块的那几秒就不像一张静止图。
+        // ramp 从开场过半之后才起转，接图那一帧和精读画面逐像素一致；收尾消散那 300 ms 停转，
+        // 落机时再由 lookBlend 收回玩家视线。
+        float ramp = smooth(Mth.clamp((introElapsed - INTRO_MS * 0.5F) / (INTRO_MS * 0.5F), 0.0F, 1.0F));
+        if (collapseAt < 0L) {
+            this.orbitDeg = Math.min(DRIFT_MAX_DEG,
+                    orbitDeg + DRIFT_DEG_PER_SEC * ramp * (delta / 1000.0F));
+        }
+        yaw = siteYaw + orbitDeg;
         pitch = Mth.lerp(e, startPitch, sitePitch);
         double yr = Math.toRadians(yaw);
         double pr = Math.toRadians(pitch);
@@ -503,13 +576,16 @@ final class SiteRevealWorldRenderer {
                 if (start < 0L) {
                     start = fadeStartNow(index);
                     if (start < 0L) {
-                        pending++;
+                        // 只有等待圈里的才算"还没好"：圈外那些视距外的区块永远等不到，
+                        // 让它们自己去散，最后一起收尾
+                        if (waitZone[index]) pending++;
                         continue;
                     }
                     fadeAt[index] = start;   // 一定住：定了就不再改，不然淡到一半会跳
                 }
+                if (!waitZone[index]) continue;
                 if (start > latest) latest = start;
-                if (revealClockMs >= start + REVEAL_TAIL_MS) done++;
+                if (revealClockMs >= start + fadeLen(start)) done++;
             }
         }
         ready = done;
@@ -556,6 +632,27 @@ final class SiteRevealWorldRenderer {
         if (index < 0) return;
         sightings++;
         if (drawnAt[index] == 0L) drawnAt[index] = revealClockMs + 1L;
+    }
+
+    /**
+     * 某个区块为心的方形范围内，真实网格上没上屏：数的是 {@link #drawnAt}（Sodium 绘制列表的回报）。
+     *
+     * <p>只要求<b>绝大多数</b>进过列表（85%）：镜头朝向那一侧会一直在画，相机背后那几列
+     * 可能永远进不了列表，不能因为它们把人卡在天上。一次回报都没收到（没装 Sodium）时直接放行。
+     */
+    boolean gateAreaDrawn(int centerChunkX, int centerChunkZ, int radius) {
+        if (sightings <= 0) return true;
+        int known = 0;
+        int drawn = 0;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                int index = chunkIndex(centerChunkX + dx, centerChunkZ + dz);
+                if (index < 0) continue;
+                known++;
+                if (drawnAt[index] != 0L) drawn++;
+            }
+        }
+        return known == 0 || drawn * 100 >= known * 85;
     }
 
     private int chunkIndex(int chunkX, int chunkZ) {
@@ -626,8 +723,14 @@ final class SiteRevealWorldRenderer {
         return ready;
     }
 
+    /** 进度条分母：等待圈里的区块列数（不是整张细场，见 {@link #waitRadius}）。 */
     int total() {
-        return total;
+        return waitTotal;
+    }
+
+    /** 落机前等的半径（区块）：界面上写清楚"在等多大一圈"。 */
+    int waitRadius() {
+        return waitRadius;
     }
 
     /** 淡出放行方式各用了多少块（日志用：能一眼看出这次交接走的是网格判据还是到货判据）。 */
@@ -637,25 +740,79 @@ final class SiteRevealWorldRenderer {
     }
 
     /**
-     * 该露的都露完了：每一块都已经放行（{@code waiting == 0}）并且最后开始淡的那块也淡完了。
-     * 之前用「让位时间用满」当判据，几百块视距外的柱子还站着就被判成结束，接着整片被抹掉。
+     * 等待圈里该露的都露完了：圈内每一块都已经放行、且最后开始淡的那块也淡完了。
+     *
+     * <p>圈外（视距之外那几百块）不参与判定：它们的数据永远不来，等它们只会把人吊在天上。
+     * 圈内好了就开始收尾消散，圈外剩下的由 {@link #beginCollapse()} 一次性抹掉。
      */
-    boolean allReady() {
-        return revealClockStarted && waiting == 0 && revealClockMs >= maxFadeStart + REVEAL_TAIL_MS;
+    boolean zoneRevealed() {
+        return revealClockStarted && collapseAt < 0L
+                && waiting == 0 && revealClockMs >= maxFadeStart + REVEAL_TAIL_MS;
+    }
+
+    /** 收尾消散已经开始。 */
+    boolean collapsing() {
+        return collapseAt >= 0L;
     }
 
     /**
-     * 按离庭院中心的远近排一遍让位时刻：院子那一格最先开始，向外扩散到场地边缘。
-     * 服务端真实落点到得晚，圆心会变，所以单独一个方法，{@link #retargetPlan} 里要重排。
+     * 该露的都露完了：正在收尾时就是"收尾散完了"，否则和 {@link #zoneRevealed()} 一致。
+     * 绘制那边用它判断「这一帧还有没有东西要画」。
+     */
+    boolean allReady() {
+        if (!revealClockStarted) return false;
+        if (collapseAt >= 0L) return revealClockMs >= collapseAt + COLLAPSE_MS;
+        return waiting == 0 && revealClockMs >= maxFadeStart + REVEAL_TAIL_MS;
+    }
+
+    /**
+     * 收尾：把所有还没轮到（或排到很久以后）的柱子<b>一次性</b>拉到同一时刻开始消散，
+     * 用 {@link #COLLAPSE_MS} 这么短的时长一起淡掉。
+     *
+     * <p>为什么必须一起散：落机缘由是"等待圈已经露出来了"，镜头接着要往门口/出生点动，
+     * 这时远处还立着柱子的话，镜头一平移就会从柱子中间穿过去（穿帮）。先散再动，
+     * 屏幕边缘那点地形换真地形也就一瞬间的事。
+     */
+    void beginCollapse() {
+        if (collapseAt >= 0L) return;
+        collapseAt = revealClockMs;
+        int removed = 0;
+        for (int i = 0; i < total; i++) {
+            long start = fadeAt[i];
+            if (start < 0L || start > collapseAt) {
+                if (start < 0L) removed++;
+                fadeAt[i] = collapseAt;
+            }
+        }
+        waiting = 0;
+        System.out.println("[yardsite] 沙盘收尾：还没放行的 " + removed + " 个区块列一起消散（"
+                + COLLAPSE_MS + " ms，之后镜头再动）");
+    }
+
+    /** 这一块的淡出时长：收尾那批用短时长，正常让位用 {@link #FADE_MS}。 */
+    private long fadeLen(long start) {
+        return collapseAt >= 0L && start >= collapseAt ? COLLAPSE_MS : REVEAL_TAIL_MS;
+    }
+
+    /**
+     * 按离中心（庭院）的远近排一遍让位时刻：中心那格最先开始，向外扩散。
+     *
+     * <p>分两档：<b>等待圈内</b>用 {@link #REVEAL_SPREAD_NEAR_MS}（约 2.2 秒走完整圈，镜头不用等太久），
+     * <b>圈外</b>仍按整场的 {@link #REVEAL_SPREAD_MS} 慢慢铺开（那一片本来就在视距外/边缘，
+     * 太早淡掉会露出空洞）。服务端真实落点到得晚，圆心会变，所以单独一个方法，{@link #retargetPlan} 里要重排。
      */
     private void recomputeWave() {
         double radius = Math.max(1.0, fineHalf * (double) fineStep);
+        double nearBlocks = Math.max(32.0, (waitRadius + 0.5) * 16.0);
         for (int row = 0; row < chunkRows; row++) {
             for (int col = 0; col < chunkCols; col++) {
+                int index = row * chunkCols + col;
                 double dx = (chunkBaseX + col) * 16 + 8 - plan.plotCenterX();
                 double dz = (chunkBaseZ + row) * 16 + 8 - plan.plotCenterZ();
-                double fraction = Math.min(1.0, Math.sqrt(dx * dx + dz * dz) / radius);
-                waveAt[row * chunkCols + col] = (long) (REVEAL_SPREAD_MS * Math.pow(fraction, 0.7));
+                double dist = Math.sqrt(dx * dx + dz * dz);
+                double spread = waitZone[index] ? REVEAL_SPREAD_NEAR_MS : REVEAL_SPREAD_MS;
+                double norm = Math.min(1.0, dist / (waitZone[index] ? nearBlocks : radius));
+                waveAt[index] = (long) (spread * Math.pow(norm, 0.7));
             }
         }
     }
@@ -784,9 +941,11 @@ final class SiteRevealWorldRenderer {
                     fade = drawField.edgeFade(ci, cj) * globalAlpha;
                 } else {
                     long elapsed = revealClockMs - start;
-                    if (elapsed >= REVEAL_TAIL_MS) continue;
-                    // 整块就地一起淡：不再逐格错峰，错峰看起来像一道波扫过去
-                    float t = Mth.clamp(elapsed / (float) FADE_MS, 0.0F, 1.0F);
+                    long len = fadeLen(start);
+                    if (elapsed >= len) continue;
+                    // 整块就地一起淡：不再逐格错峰，错峰看起来像一道波扫过去；
+                    // 收尾那批（beginCollapse）用短时长，一起散干净
+                    float t = Mth.clamp(elapsed / (float) len, 0.0F, 1.0F);
                     if (t >= 1.0F) continue;
                     fade = (1.0F - soften(t)) * drawField.edgeFade(ci, cj) * globalAlpha;
                 }

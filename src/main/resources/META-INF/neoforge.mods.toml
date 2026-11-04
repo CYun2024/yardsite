@@ -1,14 +1,17 @@
 modLoader="javafml"
 loaderVersion="[4,)"
-license="All Rights Reserved"
+license="MIT"
 
 [[mods]]
 modId="yardsite"
 version="0.1.0"
-displayName="群系选区"
-authors="CYun2024"
+displayName="Yard Site · 群系选区"
+authors="CYun_CYER"
 description='''创建单人世界前先看一张出生点附近的地形与群系图，把落点定准，再随一段落成镜头进世界。
 单独安装时选出来的是出生点；同时安装庭院系列时，同一个落点会变成庭院占地。'''
+
+# 游戏内 mod 列表显示的小图标（jar 根目录的 icon.png，512×512 以上）
+logoFile="icon.png"
 
 [[mixins]]
 config="yardsite.mixins.json"

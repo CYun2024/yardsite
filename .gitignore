@@ -1,0 +1,23 @@
+# Gradle
+.gradle/
+build/
+out/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+bin/
+
+# 运行时
+run/
+runs/
+eclipse/
+*.log
+
+# 仅用于编译的第三方 jar（Sodium 等），不要提交、也不要打进发布包
+libs/*.jar
+!libs/*.md

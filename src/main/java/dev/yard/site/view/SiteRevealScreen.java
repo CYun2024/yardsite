@@ -91,16 +91,25 @@ public class SiteRevealScreen extends Screen {
      */
     private static final long MAX_DESCEND_FRAME_MS = 80L;
     /**
-     * 落机前要求门口这片区块的网格<b>已经编译完</b>（方形半径，区块数）。
+     * 落机前看一下门口这片（方形半径，区块）的网格上没上屏。
+     *
      * <p>实测（2026-11-03 21:06 的日志）：落机 5.5 秒里我们自己的开销是 0 ms，
      * 唯一一次 169 ms 卡帧正好压在"半径 6（13×13）客户端编译完"那一刻 —— 是网格上传，不是镜头。
-     * 等它编译完再开场，卡顿就不再叠在收尾上；视距小的机器按视距 - 1 自动收窄。
+     * 等它就位再开场，卡顿就不再叠在收尾上。
+     *
+     * <p><b>判据换成「真实网格进过绘制列表」</b>（和让位用的是同一份 Sodium 回报）：
+     * 原来问原版 {@code LevelRenderer#isSectionCompiled}，而 Sodium 接管了区块渲染，那个接口
+     * 在 Sodium 下永远报未编译 —— 判据永远不成立，只能干等到超时，这就是"已移交真实区块之后
+     * 还在天上停十几秒"的原因。没装 Sodium（收不到回报）时直接放行，不拿这条卡人。
      */
     private static final int GATE_READY_RADIUS = 6;
-    /** 查门口的编译状态别每帧查（169 个区块，每帧查也够呛）。 */
+    /** 查门口的画面上屏状态别每帧查（169 个区块，每帧查也够呛）。 */
     private static final long GATE_READY_POLL_MS = 250L;
-    /** 为了等门口那片，最多再多等这么久（在 {@link #REVEAL_READY_CAP_MS} 之外）。 */
-    private static final long GATE_READY_EXTRA_MS = 8_000L;
+    /**
+     * 等待圈已经露完之后，最多再给门口这片这么久（毫秒）：门口那几列可能正好在相机背面、
+     * 永远进不了绘制列表，不能让它把人吊死。
+     */
+    private static final long GATE_GRACE_MS = 1_200L;
     /** 总上限：动画再好看也不能把人关在外面。 */
     private static final int HARD_CAP_MS = 60_000;
 
@@ -129,6 +138,11 @@ public class SiteRevealScreen extends Screen {
     private long aerialAt;
     /** 镜头开始落回玩家的时刻。 */
     private long descendAt;
+    /**
+     * 收尾消散的开始时刻：等待圈露完之后，先把剩下没轮到的柱子一次性散掉，
+     * 散完（{@link SiteRevealWorldRenderer#COLLAPSE_MS}）才 {@code descendAt}，否则镜头会从柱子中间穿过去。
+     */
+    private long collapseAt;
     /**
      * 落机航点（世界坐标，第一个是空中机位、最后一个是玩家眼睛）与各自的时间节点。
      * 到 {@code descendAt} 那一刻才定；{@code null} = 还没定，退回直线插值。
@@ -315,26 +329,39 @@ public class SiteRevealScreen extends Screen {
             System.out.println("[yardsite] 真世界接管相机（点创建后 " + (now - openedAt) + " ms）");
         }
         if (aerialAt != 0L && descendAt == 0L) {
-            // 每帧都试着把人放到位：旅社是进世界之后才盖的，盖完那一刻之前走廊还站不住，一帧定生死会直接跳过
+            // 每帧都试着把人放到位：建筑是进世界之后才盖的，盖完那一刻之前走廊还站不住，一帧定生死会直接跳过
             placePlayerInCorridor();
-            boolean all = world.allReady();
-            if (all && allReadyAt == 0L) allReadyAt = now;
-            if (all && !gateAreaReady && now - gateCheckAt >= GATE_READY_POLL_MS) {
-                gateCheckAt = now;
-                gateAreaReady = gateAreaCompiled(plan);
-            }
-            // 柱子淡完还不够：门口那片网格还在上传的话，卡顿会正好叠在落机收尾上，等它编译完再开场
-            boolean timeout = now - aerialAt >= REVEAL_READY_CAP_MS + GATE_READY_EXTRA_MS;
-            if ((all && gateAreaReady) || timeout) {
+            if (collapseAt == 0L) {
+                // 只等等待圈（视距内 ±8~10 区块）露出来，不再等整张沙盘
+                boolean all = world.zoneRevealed();
+                if (all && allReadyAt == 0L) allReadyAt = now;
+                if (all && !gateAreaReady && now - gateCheckAt >= GATE_READY_POLL_MS) {
+                    gateCheckAt = now;
+                    gateAreaReady = gateAreaCompiled(plan);
+                }
+                // 门口那片只是"让卡顿别叠在收尾上"的余量：圈已经露完就先等一小会儿，
+                // 它要是永远不就位（相机背面 / 没装 Sodium），到点照样走，不能把人吊在天上
+                boolean gateSettled = gateAreaReady
+                        || (allReadyAt != 0L && now - allReadyAt >= GATE_GRACE_MS);
+                boolean timeout = now - aerialAt >= REVEAL_READY_CAP_MS;
+                if ((all && gateSettled) || timeout) {
+                    // 先让剩下的沙盘一次性散干净，散完才动镜头（不然远处还立着柱子，镜头一挪就穿帮）
+                    collapseAt = now;
+                    world.beginCollapse();
+                    long settle = allReadyAt == 0L ? 0L : now - allReadyAt;
+                    System.out.println("[yardsite] 等待圈已露真地形（" + world.ready() + "/" + world.total()
+                            + "，半径 " + world.waitRadius() + " 区块，" + world.revealReport()
+                            + (timeout ? "，等到上限" : "")
+                            + "，门口那片" + (gateAreaReady ? "已上屏"
+                                    : "未就位、按宽限 " + settle + " ms 放行")
+                            + "，点创建后 " + (now - openedAt) + " ms），开始收尾消散");
+                }
+            } else if (world.allReady()) {
+                // allReady 这里的意思是「收尾那批也散完了」（用动画自己的时钟算，卡帧时不会提前动）
                 descendAt = now;
                 descendLastAt = now;
                 prepareDescent();
-                long settle = allReadyAt == 0L ? 0L : now - allReadyAt;
-                System.out.println("[yardsite] 真世界替换结束（" + world.ready() + "/" + world.total()
-                        + "，" + world.revealReport()
-                        + (timeout ? "，等到上限" : "")
-                        + (settle > 500L ? "，等门口区块网格 " + settle + " ms" : "，门口区块已编译")
-                        + "，点创建后 " + (now - openedAt) + " ms），开始落机");
+                System.out.println("[yardsite] 沙盘散完，开始落机（点创建后 " + (now - openedAt) + " ms）");
             }
         }
         if (descendAt != 0L && descendClockMs >= descendMs) {
@@ -493,9 +520,13 @@ public class SiteRevealScreen extends Screen {
     }
 
     /**
-     * 门口那片区块的网格编译完了没有：以出生点所在区块为中心、半径 {@link #GATE_READY_RADIUS}
-     * 的方形范围（视距小的机器按 视距-1 自动收窄）。判据和原版加载界面同一套
-     * （{@code LevelRenderer#isSectionCompiled}），所以装了 Sodium 也照样能问。
+     * 出生点周围这一片（方形半径 {@link #GATE_READY_RADIUS}）的真实网格上没上屏。
+     *
+     * <p>判据是<b>Sodium 绘制列表的回报</b>（{@code ChunkRenderListMixin} 每帧迭代到就记一次），
+     * 和柱子的让位判据同源。以前问的是原版 {@code LevelRenderer#isSectionCompiled}，
+     * 而 Sodium 接管了区块渲染，那个接口在它下面永远报"未编译" —— 判据永远不成立，
+     * 只能等到 33 秒的超时兜底，表现就是"显示已移交真实区块之后，还在天上停十几秒"。
+     * 收不到回报（没装 Sodium）时由 {@link SiteRevealWorldRenderer#gateAreaDrawn} 直接放行。
      */
     private boolean gateAreaCompiled(SitePlan plan) {
         Minecraft mc = this.minecraft;
@@ -503,7 +534,7 @@ public class SiteRevealScreen extends Screen {
         BlockPos spawn = new BlockPos(plan.spawnX(), plan.spawnY(), plan.spawnZ());
         int radius = Math.min(GATE_READY_RADIUS,
                 Math.max(1, mc.options.renderDistance().get() - 1));
-        return ChunkLoadDiagnostics.areaCompiled(mc, spawn.getX() >> 4, spawn.getZ() >> 4, radius);
+        return world != null && world.gateAreaDrawn(spawn.getX() >> 4, spawn.getZ() >> 4, radius);
     }
 
     /**
@@ -881,9 +912,17 @@ public class SiteRevealScreen extends Screen {
     private void drawProgress(GuiGraphics g) {
         int ready = world == null ? 0 : world.ready();
         int total = world == null ? 0 : world.total();
+        int radius = world == null ? 0 : world.waitRadius();
         g.drawString(this.font, SiteText.revealTitle("载入真实地形"), 8, 6, GOLD, true);
-        String text = ready >= total && total > 0 ? "真实地形已接管"
-                : "真实地形载入中 " + ready + "/" + total;
+        String text;
+        if (collapseAt != 0L) {
+            text = "收起沙盘…";
+        } else if (ready >= total && total > 0) {
+            text = "真实地形已接管";
+        } else {
+            // 分母是等待圈里的区块数（视距内 ±N 区块），不是整张 31×31 的沙盘
+            text = "真实地形载入中 " + ready + "/" + total + "（半径 " + radius + " 区块）";
+        }
         int barWidth = Math.min(280, this.width - 40);
         int x = (this.width - barWidth) / 2;
         int y = this.height - 28;

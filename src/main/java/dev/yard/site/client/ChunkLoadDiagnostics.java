@@ -122,9 +122,11 @@ public final class ChunkLoadDiagnostics {
     /**
      * 以某个区块为中心、半径 {@code radius} 的方形范围，客户端网格是不是都编译好了。
      *
-     * <p>落机用它当"可以开场了"的判据：镜头往大门里落的那 5 秒里，如果门口那片网格还在上传，
-     * 卡顿会正好叠在收尾上（实测 169 ms，日志里同一时刻正好打"半径 6 编译完"）。
-     * 只读客户端状态，不改任何流程。
+     * <p><b>别拿它当落机判据</b>：判据是 {@code LevelRenderer#isSectionCompiled}，
+     * 而 Sodium 接管了区块渲染，装 Sodium 时它<b>永远返回 false</b>（2026-11-04 实测：
+     * 用它的门口判据永远不成立，只能等超时，表现是"显示已移交真实区块后还在天上停十几秒"）。
+     * 落机现在改用 {@code SiteRevealWorldRenderer#gateAreaDrawn}（Sodium 绘制列表回报）。
+     * 这里留着只给诊断/无 Sodium 的排查用。
      */
     public static boolean areaCompiled(Minecraft mc, int centerChunkX, int centerChunkZ, int radius) {
         ClientLevel level = mc.level;
