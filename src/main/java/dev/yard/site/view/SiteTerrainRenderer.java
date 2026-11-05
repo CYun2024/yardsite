@@ -1,5 +1,6 @@
 package dev.yard.site.view;
 
+import dev.yard.site.YardSiteConfig;
 import dev.yard.site.YardSiteLog;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.VertexConsumer;
@@ -36,7 +37,8 @@ import java.util.List;
  * 和背面剔除，否则后画的字会被沙盘挡、单面条片的墙会被剔掉。
  *
  * <h2>动画</h2>
- * 两层：① 加载时格子从中心一圈圈往外长（{@code drawnAt} 起算，一边淡入一边从底面长高）；
+ * 两层：① 加载时格子从中心一圈圈往外长（{@code drawnAt} 起算，一边淡入一边从底面长高；
+ * {@code site.instantReveal} 打开时不等这一段铺开，采到哪一格就画满哪一格）；
  * ② 大沙盘 ↔ 区块精读切换时，界面给两个字段各传一组<b>全局 alpha + 高度比例</b>，旧图淡出下沉、
  * 新图淡入长起来，再加一点镜头推近，就是那段过渡。
  */
@@ -62,49 +64,78 @@ final class SiteTerrainRenderer {
     private static final int BUCKETS = 4096;
     /** 点选时沿视线推进的步长（模型单位）。 */
     private static final float MARCH_STEP = 0.007F;
-    /** 临时数组容量：得装下最大的那张图（精读圆形窗口半径 64 → 129×129）。 */
-    private static final int MAX_COLUMNS = Math.max(SiteMapSampler.HEIGHT_RES, ChunkSitePlanner.COLUMNS);
-    private static final int MAX_CELLS = MAX_COLUMNS * MAX_COLUMNS;
+    /**
+     * 临时数组的当前容量（柱子数）。大沙盘的柱子数会随范围变（见
+     * {@link SiteMapSampler#columnsFor}），所以容量不再按某张图的写死，谁大就造到谁。
+     */
+    private int capacity;
 
     private static final int PLATE = 0xF2171A22;
     private static final int GOLD = 0xFFFFD24A;
 
     /** 每根柱子这一帧的柱顶（模型 z），负数 = 还没出现。 */
-    private final float[] tops = new float[MAX_CELLS];
+    private float[] tops = new float[0];
     /** 每根柱子的地表 y（采集后不变，动画只改它画多高）。 */
-    private final int[] columnMax = new int[MAX_CELLS];
+    private int[] columnMax = new int[0];
     /** 每根柱子这一帧的淡入透明度（0..255）。 */
-    private final int[] colAlpha = new int[MAX_CELLS];
+    private int[] colAlpha = new int[0];
     /**
      * 每根柱子<b>不用每帧重算</b>的部分：模型空间的四条边、颜色。
      * 柱子宽度是靠 {@link #vertex} 整体撑开横向实现的，所以改宽度也不用重算这些。
      */
-    private final float[] edgeX0 = new float[MAX_CELLS];
-    private final float[] edgeX1 = new float[MAX_CELLS];
-    private final float[] edgeY0 = new float[MAX_CELLS];
-    private final float[] edgeY1 = new float[MAX_CELLS];
-    private final int[] colRgb = new int[MAX_CELLS];
+    private float[] edgeX0 = new float[0];
+    private float[] edgeX1 = new float[0];
+    private float[] edgeY0 = new float[0];
+    private float[] edgeY1 = new float[0];
+    private int[] colRgb = new int[0];
     /**
      * 一根柱子最终取自哪个细格（大沙盘 2×2 里占多数的那个）：颜色、重着色、群系高亮都问它。
      */
-    private final int[] colCellX = new int[MAX_CELLS];
-    private final int[] colCellY = new int[MAX_CELLS];
+    private int[] colCellX = new int[0];
+    private int[] colCellY = new int[0];
     /** 这根柱子取的群系在 {@link SiteField#biomes()} 里的下标（编辑模式判断是不是正在调色那种）。 */
-    private final int[] colBiome = new int[MAX_CELLS];
+    private int[] colBiome = new int[0];
     /** 这根柱子是不是「正在调色」那个群系（顶面提亮，一眼看到铺到哪）。 */
-    private final boolean[] colHighlight = new boolean[MAX_CELLS];
-    private final boolean[] colPrepared = new boolean[MAX_CELLS];
+    private boolean[] colHighlight = new boolean[0];
+    private boolean[] colPrepared = new boolean[0];
     /** 缓存属于哪一块地：柱子序号没变但它代表的区块变了（精读挪中心）时，缓存要重算。 */
-    private final long[] colKey = new long[MAX_CELLS];
+    private long[] colKey = new long[0];
     /** 当前缓存属于哪张图；换图（大沙盘↔精读）时全部作废重算一次。 */
     private SiteField preparedField;
     /** 缓存算出来时的配色版本（编辑模式改了群系颜色就变）。 */
     private int preparedVersion;
     /** 正在调色的那个群系（null = 编辑模式没开面板），它的所有柱子顶面提亮。 */
     private ResourceLocation highlightBiome;
-    private final int[] readyOrder = new int[MAX_CELLS];
-    private final int[] bucket = new int[MAX_CELLS];
-    private final int[] sorted = new int[MAX_CELLS];
+    private int[] readyOrder = new int[0];
+    private int[] bucket = new int[0];
+    private int[] sorted = new int[0];
+
+    /**
+     * 把临时数组造到能装下 {@code cells} 根柱子。只在换成更大的图时发生一次：整批重造，
+     * 顺带作废柱子缓存（能走到这里说明要么换了图、要么图变大了，本来就得重算）。
+     */
+    private void ensureCapacity(int cells) {
+        if (capacity >= cells) return;
+        capacity = cells;
+        tops = new float[cells];
+        columnMax = new int[cells];
+        colAlpha = new int[cells];
+        edgeX0 = new float[cells];
+        edgeX1 = new float[cells];
+        edgeY0 = new float[cells];
+        edgeY1 = new float[cells];
+        colRgb = new int[cells];
+        colCellX = new int[cells];
+        colCellY = new int[cells];
+        colBiome = new int[cells];
+        colHighlight = new boolean[cells];
+        colPrepared = new boolean[cells];
+        colKey = new long[cells];
+        readyOrder = new int[cells];
+        bucket = new int[cells];
+        sorted = new int[cells];
+        preparedField = null;
+    }
     private final int[] counts = new int[BUCKETS];
     private final int[] write = new int[BUCKETS];
     private final Matrix3f rotation = new Matrix3f();
@@ -569,7 +600,7 @@ final class SiteTerrainRenderer {
 
     /**
      * 只把某种群系的柱子颜色重算一遍，其余缓存原样留着。
-     * 拖动取色方块时每帧都会改一次颜色，整张图重算（大沙盘 16384 根柱子）会看出掉帧。
+     * 拖动取色方块时每帧都会改一次颜色，整张图重算（大沙盘几万根柱子）会看出掉帧。
      */
     private void retint(SiteField field, ResourceLocation id, int columns) {
         List<BiomeInfo> biomes = field.biomes();
@@ -605,6 +636,9 @@ final class SiteTerrainRenderer {
      * 淡入透明度。柱子的边和颜色走 {@link #prepareColumn} 的缓存，不再每帧重算。
      */
     private void collect(SiteField field, long now, int columns, int per, float heightScale) {
+        ensureCapacity(columns * columns);
+        // site.instantReveal 打开时柱子不参与铺开动画：采到哪一格就画满哪一格
+        boolean instant = YardSiteConfig.SITE_INSTANT_REVEAL.get();
         int prefsVersion = SiteEditorPrefs.version();
         if (field != preparedField) {
             Arrays.fill(colPrepared, false);
@@ -646,7 +680,9 @@ final class SiteTerrainRenderer {
             int column = readyOrder[k];
             int ci = column % columns;
             int cj = column / columns;
-            float t = Mth.clamp((now - field.drawnAt(ci, cj, now)) / (float) FADE_MS, 0.0F, 1.0F);
+            // 照常记「第一次被画到」的时间，开关只决定它参不参与这段动画
+            long born = field.drawnAt(ci, cj, now);
+            float t = instant ? 1.0F : Mth.clamp((now - born) / (float) FADE_MS, 0.0F, 1.0F);
             float ratio = Math.max((columnMax[column] - base) / span, WATER_SINK);
             tops[column] = ratio * RELIEF * smooth(t) * heightScale;
             // 圆形窗口的外圈几格逐渐透明：新进来淡入、快出去淡出，不硬弹
@@ -969,6 +1005,8 @@ final class SiteTerrainRenderer {
         int fine = field.fine();
         float scale = scaleOf(areaSize);
         if (scale <= 0.0F) return false;
+        // 第一帧还没画过（柱子顶全是空的）就点不到，别拿空数组当数据
+        if (columns * columns > capacity) return false;
         float w = widthScale;
         float a = (float) ((guiX - (areaX + areaSize / 2.0F + panX)) / scale);
         float b = (float) ((guiY - (areaY + areaSize / 2.0F + panY)) / scale);

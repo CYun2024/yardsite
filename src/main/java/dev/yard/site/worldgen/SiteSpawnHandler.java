@@ -5,6 +5,7 @@ import dev.yard.site.YardSiteConfig;
 import dev.yard.site.api.SiteLink;
 import dev.yard.site.api.SiteLinks;
 import dev.yard.site.api.SitePlan;
+import dev.yard.site.compat.EpicTerrainCompat;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.server.level.ServerLevel;
@@ -59,8 +60,10 @@ public final class SiteSpawnHandler {
         long startedAt = System.currentTimeMillis();
         ChunkGenerator generator = level.getChunkSource().getGenerator();
         RandomState randomState = randomState(level, generator);
+        // 只有落点这几列，没有邻居网格可参考 → 起点走默认快扫，上限按世界认（史诗地形那种抬到 500）
         SurfaceProbe probe = new SurfaceProbe(generator, randomState, level.getMinBuildHeight(),
-                level.getHeight(), generator.getSeaLevel());
+                level.getHeight(), generator.getSeaLevel(),
+                EpicTerrainCompat.peakCeiling(level.registryAccess()));
         LevelHeightAccessor accessor = probe.fullAccessor();
 
         SitePlan plan = link == null ? null : link.plan(level, probe, pending.x(), pending.z(), pending.exact());

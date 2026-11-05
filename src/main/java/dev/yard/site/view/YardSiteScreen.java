@@ -2,6 +2,7 @@ package dev.yard.site.view;
 
 import dev.yard.site.YardSiteLog;
 import dev.yard.site.YardSiteConfig;
+import dev.yard.site.compat.EpicTerrainCompat;
 import dev.yard.site.worldgen.SiteSelection;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -31,7 +32,9 @@ import java.util.concurrent.Executors;
  *
  * <h2>两层视图</h2>
  * <ul>
- *   <li><b>大沙盘</b>：±{@code siteSelectRadius} 格，群系逐格 256×256、高度 128×128，用来挑大致方位；</li>
+ *   <li><b>大沙盘</b>：±{@code site.selectRadius} 格（认到史诗地形按 ±{@code site.selectRadiusEpic}
+ *       加宽），柱子和采样点随范围一起长（128 根柱子起、半径翻倍升一档，上限
+ *       {@code site.sandboxColumns}），群系细格始终是柱子的 2 倍边长，用来挑大致方位；</li>
  *   <li><b>区块精读</b>：双击柱子或点「进入区块精读」进去，一格 = 一个区块，窗口是中心
  *       向外 32 区块；中心随拖动挪、新露出的边增量采样、采过的走缓存，选点就钉在区块上
  *       （见 {@link ChunkSitePlanner}）。「返回大沙盘」可以换地方重来。</li>
@@ -167,7 +170,9 @@ public class YardSiteScreen extends Screen {
         this.parent = parent;
         this.context = context;
         this.onProceed = onProceed;
-        this.radius = YardSiteConfig.SITE_SELECT_RADIUS.get();
+        // 史诗地形那种山系上万格宽的世界按配置加宽图（site.selectRadiusEpic），别的世界照旧
+        this.radius = EpicTerrainCompat.selectRadius(context.worldgenLoadContext(),
+                YardSiteConfig.SITE_SELECT_RADIUS.get(), YardSiteConfig.SITE_SELECT_RADIUS_EPIC.get());
         // 编辑模式的参数是存盘的（config/yardsite/site_biome_colors.json）：上次调好的宽度/配色这次还在
         SiteEditorPrefs.load();
         this.sandboxWidth = SiteEditorPrefs.sandboxWidth();
@@ -190,7 +195,8 @@ public class YardSiteScreen extends Screen {
             long buildStart = System.currentTimeMillis();
             sampler.build(() -> cancelled);
             if (cancelled) return;
-            YardSiteLog.debug("选址图 256×256 采完：+"
+            YardSiteLog.debug("选址图采完（群系 " + view.fine + "×" + view.fine + " 细格、柱子 "
+                    + view.columns + "×" + view.columns + " 根）：+"
                     + (System.currentTimeMillis() - buildStart) + " ms（累计 "
                     + (System.currentTimeMillis() - started) + " ms）");
         } catch (Throwable t) {

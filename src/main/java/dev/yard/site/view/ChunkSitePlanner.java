@@ -1,8 +1,10 @@
 package dev.yard.site.view;
 
 import dev.yard.site.YardSiteLog;
+import dev.yard.site.compat.EpicTerrainCompat;
 import dev.yard.site.compat.TerraBlenderCompat;
 import dev.yard.site.worldgen.SurfaceProbe;
+import dev.yard.site.worldgen.SurfaceTrend;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationContext;
 import net.minecraft.core.Holder;
 import net.minecraft.core.QuartPos;
@@ -279,7 +281,8 @@ final class ChunkSitePlanner implements AutoCloseable {
         this.randomState = RandomState.create(settings, registries.lookupOrThrow(Registries.NOISE), seed);
         this.biomeSource = TerraBlenderCompat.previewSource(generator, stem.type(), registries, seed);
         this.climateSampler = randomState.sampler();
-        this.probe = new SurfaceProbe(generator, randomState, minY, dimension.height(), seaLevel);
+        this.probe = new SurfaceProbe(generator, randomState, minY, dimension.height(), seaLevel,
+                EpicTerrainCompat.peakCeiling(registries));
 
         this.centerChunkX = (blockX - CELL_BLOCKS / 2) / (double) CELL_BLOCKS;
         this.centerChunkZ = (blockZ - CELL_BLOCKS / 2) / (double) CELL_BLOCKS;
@@ -436,7 +439,7 @@ final class ChunkSitePlanner implements AutoCloseable {
                     long lookup = key(chunkX, chunkZ);
                     Cell existing = cache.get(lookup);
                     if (existing != null) continue;
-                    Cell sampled = sample(chunkX, chunkZ);
+                    Cell sampled = sample(chunkX, chunkZ, cx, cz);
                     cache.put(lookup, sampled);
                     // 锚点在采样期间挪过就不动快照（下一次 syncWindow 会带上新中心）
                     if (originChunkX == cx && originChunkZ == cz) {
@@ -478,17 +481,37 @@ final class ChunkSitePlanner implements AutoCloseable {
     }
 
     /** 一格 = 一个区块：采区块中心列的地表 y，再按那个高度取群系。 */
-    private Cell sample(int chunkX, int chunkZ) {
+    private Cell sample(int chunkX, int chunkZ, int originX, int originZ) {
         int x = chunkX * CELL_BLOCKS + CELL_BLOCKS / 2;
         int z = chunkZ * CELL_BLOCKS + CELL_BLOCKS / 2;
         Holder<Biome> coarse = biomeAt(x, seaLevel + 1, z);
         boolean water = BiomePalette.isWaterBiome(coarse);
-        int surface = water ? seaLevel : baseHeight(x, z);
+        int surface = water ? seaLevel : baseHeight(x, z, trendHint(chunkX, chunkZ, originX, originZ));
         Holder<Biome> at = biomeAt(x, surface - 1, z);
         ResourceLocation id = BiomePalette.idOf(at);
         int index = palette.indexOf(id, at);
         // 颜色不烤在这里：画的时候按当前配色现算（见 colorOf），编辑模式改色才不用重采
         return new Cell(surface, index, water || surface <= seaLevel);
+    }
+
+    /**
+     * 这一格高度采样的起点提示：四个邻居区块里<b>已经采过</b>的那些（补采按离窗口中心从近到远走，
+     * 靠内一侧必定有了，外圈还没有就按「没有提示」算）。方向取「离窗口中心越来越远」，所以一路
+     * 上山时起点跟着抬高、一路下山时压低；正中心那格没有邻居，照旧用默认快扫起点。
+     */
+    private int trendHint(int chunkX, int chunkZ, int originX, int originZ) {
+        return SurfaceTrend.predict(
+                cachedSurface(chunkX - 1, chunkZ),
+                cachedSurface(chunkX + 1, chunkZ),
+                cachedSurface(chunkX, chunkZ - 1),
+                cachedSurface(chunkX, chunkZ + 1),
+                chunkX - originX, chunkZ - originZ);
+    }
+
+    /** 邻居采过就给它的地表 y，没采过给 {@link SurfaceTrend#NO_HINT}（不去现算第二次）。 */
+    private int cachedSurface(int chunkX, int chunkZ) {
+        Cell cell = cache.get(key(chunkX, chunkZ));
+        return cell == null ? SurfaceTrend.NO_HINT : cell.surface;
     }
 
     /**
@@ -510,8 +533,8 @@ final class ChunkSitePlanner implements AutoCloseable {
                 climateSampler);
     }
 
-    private int baseHeight(int x, int z) {
-        return probe.surfaceAt(x, z);
+    private int baseHeight(int x, int z, int hintY) {
+        return probe.surfaceAt(x, z, hintY);
     }
 
     // ── 给细场用的按区块查询（进世界前那段动画）───────────────────────────
