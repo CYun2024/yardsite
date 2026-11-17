@@ -164,8 +164,6 @@ Biome colours changed in the in-game editor are saved to `config/yardsite/site_b
 - The map uses the mod's own renderer. No assets from the base game or from other mods are included.
 - Outline lines are a constant width <b>in screen pixels</b>: never hair-thin at a distance, never
   chunky up close.
-- The schematic parsers have a self-check: `tools/schematic-check/run.sh` (plain Java, no game
-  needed). Run it after touching the readers or the outline builder.
 
 ## Building
 
