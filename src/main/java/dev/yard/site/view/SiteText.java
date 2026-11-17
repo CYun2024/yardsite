@@ -43,6 +43,15 @@ final class SiteText {
                 : Component.translatable(link.placeLabelKey());
     }
 
+    /**
+     * 这次选的是「一份投影结构」而不是庭院：标题和说法要跟着换，
+     * 不然整合包里会写「庭院落成」，玩家会去找一个不存在的院子。
+     */
+    static boolean structure() {
+        SiteLink link = SiteLinks.get();
+        return link != null && "yardsite-structure".equals(link.id());
+    }
+
     /** 图的标题（窗口标题用；界面里那行带层级的标题见 {@code yardsite.screen.title.*}）。 */
     static Component screenTitle() {
         return Component.translatable("yardsite.screen.title");
@@ -65,10 +74,17 @@ final class SiteText {
     }
 
     /**
-     * 落成动画的标题。两种装法各有整套标题（{@code .plot} / {@code .spawn}），
+     * 落成动画的标题。三种装法各有整套标题（{@code .plot} / {@code .structure} / {@code .spawn}），
      * 不在代码里拼「庭院落成 · 」这种前缀。
      */
     static Component revealTitle(Stage stage) {
-        return Component.translatable("yardsite.reveal.title." + stage.key + (linked() ? ".plot" : ".spawn"));
+        String kind = linkKind();
+        return Component.translatable("yardsite.reveal.title." + stage.key + "." + kind);
+    }
+
+    /** 标题用哪一套：{@code plot}（庭院）/ {@code structure}（投影）/ {@code spawn}（只要出生点）。 */
+    private static String linkKind() {
+        if (!linked()) return "spawn";
+        return structure() ? "structure" : "plot";
     }
 }

@@ -1,6 +1,8 @@
 package dev.yard.site.api;
 
+import dev.yard.site.YardSiteConfig;
 import dev.yard.site.YardSiteLog;
+import dev.yard.site.structure.SchematicSite;
 import net.neoforged.fml.ModList;
 import org.jetbrains.annotations.Nullable;
 
@@ -42,7 +44,17 @@ public final class SiteLinks {
 
     private static synchronized void resolve() {
         if (resolved) return;
+        // 配置还没加载完就别定下来：结构模式要读 configuration，这时候读会抛异常，
+        // 一不小心就会把「没有联动方」这个结论锁死到整局。
+        if (!YardSiteConfig.SPEC.isLoaded()) return;
         resolved = true;
+        // ① 结构模式：作者明确打开了（配置里指定了一份投影文件），就用它，
+        //    不再看装没装庭院系列——两套建筑同时盖没有意义，先盖的那座会被后盖的拆掉半边。
+        if (YardSiteConfig.STRUCTURE_ENABLED.get()) {
+            SchematicSite.install();
+            return;
+        }
+        // ② 庭院系列：只在装了 yardcore 时反射把它装进来
         if (!ModList.get().isLoaded("yardcore")) return;
         try {
             Class<?> bridge = Class.forName("dev.yard.core.compat.CoreSiteLink");

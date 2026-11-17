@@ -3,6 +3,9 @@ package dev.yard.site.view;
 import dev.yard.site.YardSiteLog;
 import dev.yard.site.YardSiteConfig;
 import dev.yard.site.compat.EpicTerrainCompat;
+import dev.yard.site.schematic.Schematic;
+import dev.yard.site.schematic.SchematicTransform;
+import dev.yard.site.structure.SchematicStructure;
 import dev.yard.site.worldgen.SiteSelection;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -469,6 +472,29 @@ public class YardSiteScreen extends Screen {
             for (String line : editHints) {
                 g.drawString(this.font, line, 8, y, GOLD, true);
                 y += 10;
+            }
+        }
+        // 结构模式的状态行：正常情况是可选装饰（structure.showInfo，默认关）；
+        // 读不了文件 / 没设置文件是"配错了"，不受开关控制，一定显示，不然作者只会看到图上没框。
+        if (SchematicStructure.enabled()) {
+            Schematic schematic = SchematicStructure.get();
+            boolean problem = schematic == null;
+            if (problem || YardSiteConfig.STRUCTURE_SHOW_INFO.get()) {
+                y += 2;
+                String line;
+                if (problem) {
+                    // 一份文件都没有 ≠ 文件读不了：前者要告诉作者该往哪放，后者才是"这个文件有问题"
+                    line = SchematicStructure.missing()
+                            ? tr("yardsite.screen.structure.missing")
+                            : tr("yardsite.screen.structure.error", SchematicStructure.lastError());
+                } else {
+                    SchematicTransform transform = SchematicStructure.transform();
+                    line = tr("yardsite.screen.structure.info", schematic.name,
+                            transform.width(schematic.sizeX, schematic.sizeZ),
+                            transform.depth(schematic.sizeX, schematic.sizeZ),
+                            schematic.sizeY, transform.describe());
+                }
+                drawTrimmed(g, line, 8, y, maxWidth, problem ? 0xFFFF8A80 : GOLD);
             }
         }
     }
@@ -1186,6 +1212,17 @@ public class YardSiteScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (SchematicStructure.enabled()) {
+            // 结构模式：这一局临时改朝向（不写配置文件），方便对着光影/地形试哪一面好看
+            if (keyCode == GLFW.GLFW_KEY_T) {
+                SchematicStructure.cycleRotation();
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_M) {
+                SchematicStructure.cycleMirror();
+                return true;
+            }
+        }
         if (keyCode == GLFW.GLFW_KEY_R && active() != null) {
             terrain.resetView(active());
             return true;

@@ -65,4 +65,29 @@ public interface SiteLink {
     default List<BlueprintBox> blueprint(SitePlan plan) {
         return List.of();
     }
+
+    /**
+     * 落成动画里的<b>线</b>（真正的建筑几何）；空列表 = 只画盒子。
+     *
+     * <p>和 {@link #blueprint} 二选一或并用都行：盒子适合「先粗后细」的示意，
+     * 线段适合直接把投影文件的外壳画出来（见 {@code site} 自带的结构模式）。
+     * 返回的是<b>世界坐标</b>，本 mod 不再做任何变换。
+     *
+     * <p>给的是一个 {@code List} 而不是数组：这个方法只在落成动画开始时调一次，
+     * 之后每帧只读，不做拷贝。
+     */
+    default List<BlueprintLine> blueprintLines(SitePlan plan) {
+        return List.of();
+    }
+
+    /**
+     * 进世界之后要不要由本 mod 来铺方块（返回 true 时本 mod 负责在出生点区块生成完后把建筑盖起来，
+     * 盖完会翻 {@code SiteRevealState.markBuilt()}）。
+     *
+     * <p>默认 false：建筑由联动方自己盖（庭院系列就是这样）。只有「结构模式」这种
+     * 本 mod 自己知道蓝图长什么样的情况才返回 true。
+     */
+    default boolean placesOwnStructure() {
+        return false;
+    }
 }

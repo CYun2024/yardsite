@@ -1,10 +1,14 @@
 package dev.yard.site.view;
 
+import dev.yard.site.YardSiteConfig;
 import dev.yard.site.YardSiteLog;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import dev.yard.site.api.BlueprintBox;
+import dev.yard.site.api.BlueprintLine;
 import dev.yard.site.api.SitePlan;
+import dev.yard.site.schematic.SchematicHiddenLines;
+import dev.yard.site.structure.SurfaceMesh;
 import dev.yard.site.worldgen.SiteRevealState;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -133,7 +137,7 @@ final class SiteRevealWorldRenderer {
     /** 空中机位至少有这么俯：太平就只剩一条地平线，院子读不出立体。 */
     private static final float AERIAL_PITCH_MIN = 30.0F;
     /** 正交→透视的过渡时长。 */
-    static final int INTRO_MS = 3000;
+    static final int INTRO_MS = 4200;
     /** 真实落点晚到时，镜头终点往新落点挪这么久（不重建、不重飞）。 */
     private static final int RETARGET_MS = 700;
     /** 屏幕外的剔除余量（像素）：近处一根柱子投影可以有一百多像素宽。 */
@@ -158,6 +162,33 @@ final class SiteRevealWorldRenderer {
 
     private static final int TOP_UNSET = Integer.MIN_VALUE;
     private static final int GOLD = 0xFFFFD24A;
+
+    /** 近平面：比它更近的端点要先裁掉（投影会翻到屏幕另一侧，出现横穿画面的怪线）。 */
+    private static final float NEAR_PLANE = 0.12F;
+    /** 晕的宽度倍数（同一条线再画一遍、三倍宽、很淡）。 */
+    private static final float GLOW_SCALE = 2.8F;
+    /** 线数超过这么多就不画晕了：顶点数翻倍，大建筑会顶不住。 */
+    private static final int GLOW_LINE_LIMIT = 9000;
+    /**
+     * 屏幕高度 ÷ 垂直 FOV（弧度）：交给消隐层按距离算"一条棱占几个像素"。
+     *
+     * <p>远景里半格高的窗格、栏杆只有两三个像素，画出来全是噪点；这个尺度一给，它们自己就不画了。
+     */
+    private static float pixelsPerRadian() {
+        Minecraft mc = Minecraft.getInstance();
+        double fovDegrees = mc.options.fov().get();
+        double half = Math.toRadians(fovDegrees) * 0.5;
+        return (float) (mc.getWindow().getHeight() / (2.0 * Math.tan(half)));
+    }
+
+
+    /** 细节线（凹角、玻璃板/活板门这类薄片）的透明度和线宽倍数：看得见，但不能抢主轮廓。 */
+    private static final float FINE_ALPHA = 0.62F;
+    private static final float FINE_WIDTH = 0.62F;
+    /** 结构线（凸棱但不是剪影）比基准线宽略收一点。 */
+    private static final float MAIN_WIDTH = 0.9F;
+    /** 外轮廓（剪影）再加重这么多（界面像素）。 */
+    private static final float OUTLINE_EXTRA_WIDTH = 0.45F;
 
     /**
      * 开场要接上的那张精读画面。
@@ -216,9 +247,19 @@ final class SiteRevealWorldRenderer {
     /** 动画时间按帧累加、单帧封顶 50ms：卡一下不会让镜头瞬移。 */
     private long lastTickAt;
     private float introElapsed;
+
+    /** 开场那段"正射平面图 → 透视"是否已经走完：C 段要等它走完再开始。 */
+    boolean introDone() {
+        return introElapsed >= INTRO_MS - 0.5F;
+    }
     private float introEase;
     /** 这一帧正交侧的比重（1 = 就是精读那张图）。 */
     private float orthoWeight;
+    /** 开场自动取景：内容的包围盒（世界坐标）和据此算出的镜头距离。 */
+    private float[] fitBox;
+    private double fitDistance = -1.0;
+    /** 投影最多占屏幕宽/高的多少（留一圈边，别顶到边上）。 */
+    private static final double FIT_FILL = 0.80;
     /** 这一帧的竖向压缩：开场按精读的比例，收尾展开成真实高度。 */
     private float heightScaleNow;
     /** 水面那层薄皮的厚度（方块），跟着竖向比例一起涨。 */
@@ -519,7 +560,21 @@ final class SiteRevealWorldRenderer {
         // 推近的同时抬到真实机位的聚焦高度，免得一开始整体上下错几像素
         float fy = Mth.lerp(e, baseY, (float) focus.y);
         float fz = Mth.lerp(e, startFocusZ, (float) focus.z);
-        eye = new Vec3(fx, fy, fz).subtract(look.scale(distance));
+        Vec3 fitFocus = new Vec3(fx, fy, fz);
+        // 自动取景：镜头距离不再是一个拍脑袋的常数，而是"这栋楼投影到屏幕上有多大"反推出来的。
+        // 大塔会自己退远、小屋会自己靠近，两种都正好把整栋（含屋外的花草、屋顶）装进画面。
+        if (fitDistance < 0.0) fitDistance = distance;   // 从当前机位出发往目标滑，别一帧跳过去
+        if (collapseAt < 0L) {
+            double need = fitDistanceFor(fitFocus, look, right, up, Math.tan(Math.toRadians(fov) * 0.5));
+            if (need > 0.0) {
+                // 按时间收敛（时间常数 2 秒），而不是每帧固定比例：
+                // 之前 18%/帧 会在 0.3 秒内把镜头一把推到目标，观感上就是"透视变化变快了"
+                double blend = 1.0 - Math.exp(-Math.min(0.25, delta / 1000.0) / 2.0);
+                fitDistance += (need - fitDistance) * blend;
+            }
+        }
+        if (fitDistance > 0.0) distance = (float) fitDistance;
+        eye = fitFocus.subtract(look.scale(distance));
         // 竖向比例跟着粗场现值走（精读那边可能还在慢慢涨），两侧用同一个数才对得上
         float span = Math.max(20.0F, intro.field().reliefSpan());
         heightScaleNow = Mth.lerp(e, (float) (SiteTerrainRenderer.RELIEF * orthoBlocksPerUnit / span), 1.0F);
@@ -540,6 +595,70 @@ final class SiteRevealWorldRenderer {
         this.drawLook = new Vec3(-Math.sin(yr) * Math.cos(pr), -Math.sin(pr), Math.cos(yr) * Math.cos(pr));
         this.drawRight = new Vec3(-Math.cos(yr), 0.0, -Math.sin(yr));
         this.drawUp = drawRight.cross(drawLook).normalize();
+    }
+
+    /**
+     * 接管取景：给一份内容包围盒，开场那段按它把镜头推到"正好装得下"的距离。
+     *
+     * <p>{@code null} 或空盒子 = 不自动取景，回到原来按 {@code k} 推的机位。
+     */
+    void fitBounds(SiteBlueprint blueprint) {
+        if (blueprint == null) {
+            return;
+        }
+        float[] box = new float[6];
+        float x0 = blueprint.plotMinX;
+        float z0 = blueprint.plotMinZ;
+        float x1 = blueprint.plotMaxX;
+        float z1 = blueprint.plotMaxZ;
+        float y0 = blueprint.baseY;
+        float y1 = blueprint.baseY + Math.max(1.0F, blueprint.heightBlocks);
+        if (blueprint.surface != null && blueprint.surface.count > 0) {
+            // 用真实几何：屋外的花盆、招牌、烟囱都算进去，比占地矩形准
+            blueprint.surface.bounds(box);
+            x0 = box[0];
+            y0 = box[1];
+            z0 = box[2];
+            x1 = box[3];
+            y1 = box[4];
+            z1 = box[5];
+        }
+        fitBox = new float[]{x0, y0, z0, x1, y1, z1};
+        fitDistance = -1.0;
+        YardSiteLog.debug("开场自动取景：内容 " + Math.round(x1 - x0) + "×" + Math.round(y1 - y0)
+                + "×" + Math.round(z1 - z0) + " 格，按投影比例定镜头距离");
+    }
+
+    /**
+     * 让包围盒的 8 个角都落在屏幕 {@value #FIT_FILL} 以内，需要多远？
+     *
+     * <p>用透视投影本身反推（不是近似球半径）：角点在相机坐标里横向 {@code sx}、
+     * 纵向 {@code sy}、进深 {@code along + d}，要求 {@code |sx|/(depth·tan·aspect) ≤ fill} 与
+     * {@code |sy|/(depth·tan) ≤ fill}，解出每个角要求的最小 {@code d}，取最大那个。
+     *
+     * @return 需要的距离（格）；{@code ≤ 0} = 没有取景数据
+     */
+    private double fitDistanceFor(Vec3 focus, Vec3 look, Vec3 right, Vec3 up, double tanHalf) {
+        if (fitBox == null || tanHalf <= 0.0 || fitBox[3] <= fitBox[0]) return -1.0;
+        double aspect = this.aspect > 0.1 ? this.aspect : 16.0 / 9.0;
+        double need = 0.0;
+        for (int i = 0; i < 8; i++) {
+            double px = (i & 1) == 0 ? fitBox[0] : fitBox[3];
+            double py = (i & 2) == 0 ? fitBox[1] : fitBox[4];
+            double pz = (i & 4) == 0 ? fitBox[2] : fitBox[5];
+            double dx = px - focus.x;
+            double dy = py - focus.y;
+            double dz = pz - focus.z;
+            double along = dx * look.x + dy * look.y + dz * look.z;
+            double sx = Math.abs(dx * right.x + dy * right.y + dz * right.z);
+            double sy = Math.abs(dx * up.x + dy * up.y + dz * up.z);
+            need = Math.max(need, sx / (FIT_FILL * tanHalf * aspect) - along);
+            need = Math.max(need, sy / (FIT_FILL * tanHalf) - along);
+        }
+        // 太近会穿进模型里：至少留一个包围盒对角线的距离
+        double diagonal = Math.sqrt(Math.pow(fitBox[3] - fitBox[0], 2)
+                + Math.pow(fitBox[4] - fitBox[1], 2) + Math.pow(fitBox[5] - fitBox[2], 2));
+        return Math.max(need, diagonal * 0.9);
     }
 
     private void updateChunks(Minecraft mc, long now) {
@@ -907,16 +1026,18 @@ final class SiteRevealWorldRenderer {
     // ── 绘制 ────────────────────────────────────────────────────────────
 
     void render(GuiGraphics g, int width, int height, long now, SiteBlueprint blueprint,
-                long blueprintElapsed, float globalAlpha) {
+                long blueprintElapsed, float globalAlpha, long handoverMs) {
         this.width = Math.max(1, width);
         this.height = Math.max(1, height);
         this.aspect = this.width / (double) this.height;
         this.frameNow = now;
+        this.lineWidth = YardSiteConfig.REVEAL_LINE_WIDTH.get().floatValue();
+        this.lineGlow = YardSiteConfig.REVEAL_LINE_GLOW.get();
+        this.surfaceScan = YardSiteConfig.REVEAL_SURFACE_SCAN.get();
         updateDrawSource();
 
         // 柱子全淡完、蓝图/落点十字也都收干净了：一个像素都不会变，别每帧再扫一遍格子
-        if (globalAlpha <= 0.002F && allReady()
-                && (blueprint == null || blueprintElapsed < 0L)) {
+        if (globalAlpha <= 0.002F && allReady() && buildAlpha(handoverMs) <= 0.002F) {
             orderCount[0] = 0;
             lastCollectNs = 0L;
             lastSortNs = 0L;
@@ -1018,8 +1139,9 @@ final class SiteRevealWorldRenderer {
             }
         }
 
-        if (blueprint != null && blueprintElapsed >= 0L && globalAlpha > 0.0F) {
-            drawBlueprint(consumer, blueprint, blueprintElapsed, globalAlpha);
+        // 建筑效果用自己的透明度：落机期间沙盘柱子照常淡，它留在原地等交接满 1 秒才化掉
+        if (blueprint != null && blueprintElapsed >= 0L) {
+            drawBlueprint(consumer, blueprint, blueprintElapsed, buildAlpha(handoverMs));
         }
         drawMarker(consumer);
         long tDraw1 = System.nanoTime();
@@ -1078,6 +1200,16 @@ final class SiteRevealWorldRenderer {
     private final float[] qb = new float[3];
     private final float[] qc = new float[3];
     private final float[] qd = new float[3];
+    /** 线两端的屏幕坐标（每帧复用，别给几千条线各自分配数组）。 */
+    private final float[] la = new float[3];
+    private final float[] lb = new float[3];
+    /** 这一帧的线宽 / 要不要晕：每帧从配置取一次，别在每条线上查配置。 */
+    private float lineWidth = 1.5F;
+    private boolean lineGlow = true;
+    /** 面要不要"从地基往上长"（{@code site.revealSurfaceScan}）：关掉 = 整栋一次出现。 */
+    private boolean surfaceScan = true;
+    /** 消隐那套的统计只打一次日志（每帧打会刷屏）。 */
+    private boolean hiddenReported;
 
     private static void sort(int[] order, float[] depth, int n) {
         // 柱子全淡完时 n=0，不能进快排：(0 + -1) >>> 1 会算出 Integer.MAX_VALUE
@@ -1106,20 +1238,49 @@ final class SiteRevealWorldRenderer {
 
     // ── 蓝图 ────────────────────────────────────────────────────────────
 
+    /**
+     * 施工线框：地基金面 + 盒子（联动方给的房间）/ 线段（投影文件的外壳）+ 扫过建筑的扫描线。
+     *
+     * <p><b>线一律是屏幕像素常数宽</b>（{@code site.revealLineWidth}）。以前是把线画成
+     * "世界坐标里 0.05 格宽的薄片"：镜头在 110 格外时它只有不到半像素，硬件栅格化出来是一条
+     * 断断续续、还会随镜头抖动的虚线；推进到门口又粗成一块。现在改成把两端投影到屏幕上、
+     * 按屏幕方向做垂直偏移，于是不管离多远都是同样粗细的一条干净直线。
+     */
+    /** D 段进度：0 = 还没开始（C 刚长完 + 停 2 秒），1 = 整栋都长出来了。 */
+    private static float dProgress(SiteBlueprint blueprint, long elapsedMs) {
+        return Mth.clamp((elapsedMs - blueprint.lineDelayMs - blueprint.linesMs
+                - SiteBlueprint.HOLD_MS) / (float) Math.max(1, blueprint.settleMs), 0.0F, 1.0F);
+    }
+
+    /**
+     * 建筑效果（地基金面 + 蓝图/面 + 金线 + 扫描框）的透明度。
+     *
+     * <p>和沙盘柱子不是一套：柱子跟着落机进度淡，建筑效果要<b>留在原地</b>，
+     * 等真区块接手满 {@value #HOLD_AFTER_HANDOVER_MS} ms 之后再用 {@value #FADE_AFTER_HANDOVER_MS} ms 原地淡掉。
+     * 时间从 {@code collapseAt}（真区块开始上屏、沙盘开始散）起算 —— 以前从落机开始算，
+     * 而落机本身排在所有区块到位之后，于是观感是"区块都交接完了建模才慢慢消失"。
+     */
+    static float buildAlpha(long handoverMs) {
+        if (handoverMs < 0L) return 1.0F;
+        return 1.0F - Mth.clamp((handoverMs - HOLD_AFTER_HANDOVER_MS)
+                / (float) FADE_AFTER_HANDOVER_MS, 0.0F, 1.0F);
+    }
+
     private void drawBlueprint(VertexConsumer c, SiteBlueprint blueprint, long elapsedMs, float alpha) {
+        if (alpha <= 0.002F) return;
         float px0 = blueprint.plotMinX;
         float px1 = blueprint.plotMaxX;
         float pz0 = blueprint.plotMinZ;
         float pz1 = blueprint.plotMaxZ;
         float py = drawY(blueprint.baseY, 1.0F);
         int fill = ((int) (0x30 * alpha) << 24) | (SiteBlueprint.GOLD & 0xFFFFFF);
-        int lip = ((int) (0xB0 * alpha) << 24) | (SiteBlueprint.GOLD & 0xFFFFFF);
         flat(c, px0, px1, pz0, pz1, py, fill);
-        float w = 0.04F;
-        flat(c, px0, px1, pz0 - w, pz0 + w, py, lip);
-        flat(c, px0, px1, pz1 - w, pz1 + w, py, lip);
-        flat(c, px0 - w, px0 + w, pz0, pz1, py, lip);
-        flat(c, px1 - w, px1 + w, pz0, pz1, py, lip);
+        float lw = lineWidthPx();
+        int lip = ((int) (0xB0 * alpha) << 24) | (SiteBlueprint.GOLD & 0xFFFFFF);
+        line(c, px0, py, pz0, px1, py, pz0, lip, lw);
+        line(c, px0, py, pz1, px1, py, pz1, lip, lw);
+        line(c, px0, py, pz0, px0, py, pz1, lip, lw);
+        line(c, px1, py, pz0, px1, py, pz1, lip, lw);
 
         for (BlueprintBox b : blueprint.boxes) {
             if (elapsedMs < b.delayMs()) continue;
@@ -1131,36 +1292,296 @@ final class SiteRevealWorldRenderer {
             float z1 = b.maxZ();
             float yb = drawY(b.minY(), 1.0F);
             float yt = drawY(topBlock, 1.0F);
-            float h = Math.max(0.03F, yt - yb);
             int a = (int) (255.0F * alpha * (0.55F + 0.45F * t));
             int argb = (a << 24) | (b.color() & 0xFFFFFF);
-            float e = 0.05F;
-            for (int k = 0; k < 4; k++) {
-                float cx = (k & 1) == 0 ? x0 : x1;
-                float cz = (k & 2) == 0 ? z0 : z1;
-                edge(c, cx, cz, cx + e, cz, yb, h, argb);
-                edge(c, cx, cz, cx, cz + e, yb, h, argb);
+            // 四根竖棱
+            line(c, x0, yb, z0, x0, yt, z0, argb, lw);
+            line(c, x1, yb, z0, x1, yt, z0, argb, lw);
+            line(c, x1, yb, z1, x1, yt, z1, argb, lw);
+            line(c, x0, yb, z1, x0, yt, z1, argb, lw);
+            // 底框只在往上长的时候露一下：长完了它就被地基金面压住，画了也看不见
+            if (t < 0.999F) {
+                int dim = ((int) (a * 0.5F) << 24) | (b.color() & 0xFFFFFF);
+                line(c, x0, yb, z0, x1, yb, z0, dim, lw);
+                line(c, x1, yb, z0, x1, yb, z1, dim, lw);
+                line(c, x1, yb, z1, x0, yb, z1, dim, lw);
+                line(c, x0, yb, z1, x0, yb, z0, dim, lw);
             }
+            // 顶框跟着上升的高度走
             if (t > 0.02F) {
-                flat(c, x0, x1, z0 - e, z0 + e, yt, argb);
-                flat(c, x0, x1, z1 - e, z1 + e, yt, argb);
-                flat(c, x0 - e, x0 + e, z0, z1, yt, argb);
-                flat(c, x1 - e, x1 + e, z0, z1, yt, argb);
+                line(c, x0, yt, z0, x1, yt, z0, argb, lw);
+                line(c, x1, yt, z0, x1, yt, z1, argb, lw);
+                line(c, x1, yt, z1, x0, yt, z1, argb, lw);
+                line(c, x0, yt, z1, x0, yt, z0, argb, lw);
             }
         }
 
-        if (elapsedMs > blueprint.durationMs) {
+        // 结构模式：C 段只有金线（骨架），停 2 秒，D 段面<b>自下而上</b>长出来（跟着一圈扫描框），
+        // 线在 D 的最后四分之一里淡掉——于是 D 是"把线框一格格填成实物"，不是整体淡入。
+        if (blueprint.surface != null) {
+            float dT = surfaceScan ? dProgress(blueprint, elapsedMs) : 1.0F;
+            if (dT < 1.0F) {
+                float lineFade = 1.0F - Mth.clamp((dT - 0.75F) / 0.25F, 0.0F, 1.0F);
+                drawLineSweep(c, blueprint, elapsedMs, alpha * lineFade, lw);
+            }
+            if (dT > 0.0F) {
+                drawSurface(c, blueprint, elapsedMs, alpha);
+            }
+        } else if (!blueprint.lines.isEmpty()) {
+            drawLineSweep(c, blueprint, elapsedMs, alpha, lw);
+        }
+
+        if (elapsedMs > blueprint.durationMs && blueprint.surface == null) {
             float sweep = ((elapsedMs - blueprint.durationMs) % 2600L) / 2600.0F;
             float y = drawY(blueprint.baseY + sweep * blueprint.heightBlocks, 1.0F);
             int plane = ((int) (0x12 * alpha) << 24) | (SiteBlueprint.GOLD & 0xFFFFFF);
-            int line = ((int) (0x66 * alpha) << 24) | (SiteBlueprint.GOLD_BRIGHT & 0xFFFFFF);
+            int scan = ((int) (0x66 * alpha) << 24) | (SiteBlueprint.GOLD_BRIGHT & 0xFFFFFF);
             flat(c, px0, px1, pz0, pz1, y, plane);
-            float e = 0.03F;
-            flat(c, px0, px1, pz0 - e, pz0 + e, y, line);
-            flat(c, px0, px1, pz1 - e, pz1 + e, y, line);
-            flat(c, px0 - e, px0 + e, pz0, pz1, y, line);
-            flat(c, px1 - e, px1 + e, pz0, pz1, y, line);
+            line(c, px0, y, pz0, px1, y, pz0, scan, lw);
+            line(c, px0, y, pz1, px1, y, pz1, scan, lw);
+            line(c, px0, y, pz0, px0, y, pz1, scan, lw);
+            line(c, px1, y, pz0, px1, y, pz1, scan, lw);
         }
+    }
+
+    /**
+     * 按高度把线一条条点亮：低于扫过平面的全亮，刚过的这一段最亮（接近白），
+     * 远处的已亮线回到金色。这样一栋楼是"从地基长到屋顶"，而不是整体淡入。
+     */
+    private void drawLineSweep(VertexConsumer c, SiteBlueprint blueprint, long elapsedMs,
+                               float alpha, float widthPx) {
+        if (alpha <= 0.012F) return;      // 已经淡到看不见了，别再花那几十毫秒做消隐
+        float t = Mth.clamp((elapsedMs - blueprint.lineDelayMs) / (float) Math.max(1, blueprint.linesMs),
+                0.0F, 1.0F);
+        if (t <= 0.0F) return;
+        float span = Math.max(1.0F, blueprint.heightBlocks);
+        float sweep = blueprint.baseY + span * smooth(t);
+        // 一条线从"被扫到"到"完全亮起"要走这么高：给一点过渡，别像开关一样跳
+        float feather = Math.max(0.5F, span * 0.035F);
+        // 扫过平面附近的这一段用接近白的亮色，扫过去就回到金色
+        float leadSpan = Math.max(1.5F, span * 0.16F);
+        // 按机位消隐：这一帧从这个角度看过去，哪些段露着（被挡住的整段已经剔掉、挡一半的只剩露出的那半）
+        if (blueprint.hiddenLines != null) {
+            blueprint.hiddenLines.setViewScale(pixelsPerRadian());
+            int n = blueprint.hiddenLines.resolve(drawEye.x, drawEye.y, drawEye.z, frameNow);
+            if (!hiddenReported) {
+                hiddenReported = true;
+                YardSiteLog.debug("落成线框（消隐）：候选 " + blueprint.hiddenLines.candidateCount()
+                        + " 段 → 这一帧可见 " + n + " 段，采样步长 " + blueprint.hiddenLines.step()
+                        + " 格，首次 " + blueprint.hiddenLines.lastCostMs() + " ms");
+            }
+            float[] segs = blueprint.hiddenLines.segments();
+            boolean glow = lineGlow && n <= GLOW_LINE_LIMIT;
+            for (int i = 0; i < n; i++) {
+                int base = i * 6;
+                // 三档：外轮廓（剪影）最重、结构线中等、细节线细而暗。
+                // 分档只看几何角色 + 当前机位，不看长短，所以一条边不会忽粗忽细。
+                byte tier = blueprint.hiddenLines.flag(i);
+                float lineAlpha = switch (tier) {
+                    case SchematicHiddenLines.OUTLINE -> alpha;
+                    case SchematicHiddenLines.MAIN -> alpha * 0.92F;
+                    default -> alpha * FINE_ALPHA;
+                };
+                float lineWidth = switch (tier) {
+                    case SchematicHiddenLines.OUTLINE -> widthPx + OUTLINE_EXTRA_WIDTH;
+                    case SchematicHiddenLines.MAIN -> widthPx * MAIN_WIDTH;
+                    default -> widthPx * FINE_WIDTH;
+                };
+                sweepSegment(c, segs[base], segs[base + 1], segs[base + 2],
+                        segs[base + 3], segs[base + 4], segs[base + 5],
+                        sweep, feather, leadSpan, lineAlpha, lineWidth,
+                        glow && tier == SchematicHiddenLines.OUTLINE);
+            }
+            return;
+        }
+        boolean glow = lineGlow && blueprint.lines.size() <= GLOW_LINE_LIMIT;
+        for (int i = 0; i < blueprint.lines.size(); i++) {
+            BlueprintLine l = blueprint.lines.get(i);
+            sweepSegment(c, l.x1(), l.y1(), l.z1(), l.x2(), l.y2(), l.z2(),
+                    sweep, feather, leadSpan, alpha, widthPx, glow);
+        }
+    }
+
+    /**
+     * 画一条线，按"扫到的高度"算亮度和颜色：低处已扫过=全亮金色，
+     * 刚扫过的一段接近白，没扫到的直接跳过。
+     */
+    private void sweepSegment(VertexConsumer c, float x1, float y1, float z1, float x2, float y2, float z2,
+                              float sweep, float feather, float leadSpan, float alpha,
+                              float widthPx, boolean glow) {
+        float low = Math.min(y1, y2);
+        float appear = Mth.clamp((sweep - low) / feather, 0.0F, 1.0F);
+        if (appear <= 0.01F) return;
+        float lead = Mth.clamp(1.0F - (sweep - low) / leadSpan, 0.0F, 1.0F);
+        int a = (int) (255.0F * alpha * (0.5F + 0.5F * appear));
+        if (a <= 2) return;
+        int rgb = mix(SiteBlueprint.GOLD, SiteBlueprint.GOLD_BRIGHT, lead);
+        line(c, x1, y1, z1, x2, y2, z2, (a << 24) | rgb, widthPx + lead * 0.7F, glow);
+    }
+
+    // ── 面：方案 A（静止的模型）/ 方案 D（从地基往上长）────────────────────
+
+    /** 面表的方向（和 {@code SurfaceMesh.normal} 的下标对应）。 */
+    private static final double[][] SURFACE_NORMALS = {
+            {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
+    };
+
+    /** 排序用的下标/深度缓冲（按需长，别每帧 new）。 */
+    private int[] surfaceOrder = new int[0];
+    private float[] surfaceDepth = new float[0];
+    /** 每个面的 4 个屏幕坐标（8 个 float，按面下标存）：投影一遍，排序后直接拿来提交。 */
+    private float[] surfaceScreen = new float[0];
+    /** 四个角投影后的屏幕坐标（每帧复用）。 */
+    private final float[] sa = new float[3];
+    private final float[] sb = new float[3];
+    private final float[] sc = new float[3];
+    private final float[] sd = new float[3];
+    /** 面表统计只打一次日志。 */
+    private boolean surfaceReported;
+    /** 蓝图 → 建成的渐变时长（毫秒）：长完之后这么长时间里颜色归位、金线淡掉。 */
+    /** 真实区块接手之后，建筑效果先和真方块叠这么久，再开始原地淡出。 */
+    private static final int HOLD_AFTER_HANDOVER_MS = 320;
+    /** 原地淡出的时长。 */
+    private static final int FADE_AFTER_HANDOVER_MS = 700;
+
+    /**
+     * 画落成动画的"面"。{@code site.revealSurfaceScan} 打开时按高度一层层露出来（方案 D），
+     * 关掉就是整栋一次出现的模型（方案 A）——两种只差一个 {@code sweep}。
+     *
+     * <p>全部走 <b>屏幕空间 + 画家算法</b>：GUI 批没有深度测试，所以先按面中心的深度从远到近排一遍
+     * 再提交。一个面只要有一个角在相机背后就整面跳过（落成镜头永远在建筑外面，不会贴到面里）。
+     */
+    private void drawSurface(VertexConsumer c, SiteBlueprint blueprint, long elapsedMs, float alpha) {
+        SurfaceMesh mesh = blueprint.surface;
+        if (mesh == null || mesh.count == 0) return;
+        float span = Math.max(1.0F, blueprint.heightBlocks);
+        // D 段：面自己从地基往上长（C 段只画线，面一个都不出）。
+        // 扫描框跟着扫到的高度走，所以看着就是"从下到上一格格填实"。
+        float dT = surfaceScan ? dProgress(blueprint, elapsedMs) : 1.0F;
+        if (surfaceScan && dT <= 0.0F) return;
+        boolean scan = surfaceScan && dT < 0.999F;
+        float sweep = scan ? blueprint.baseY + span * smooth(dT) : Float.MAX_VALUE;
+        float feather = Math.max(0.35F, span * 0.03F);
+        float leadSpan = Math.max(1.2F, span * 0.14F);
+
+        int limit = scan ? mesh.countBelow(sweep) : mesh.count;
+        ensureSurfaceBuffers(mesh.count);
+        int n = 0;
+        for (int i = 0; i < limit; i++) {
+            double[] normal = SURFACE_NORMALS[mesh.normal[i]];
+            int at = i * 12;
+            float x0 = mesh.pos[at];
+            float y0 = mesh.pos[at + 1];
+            float z0 = mesh.pos[at + 2];
+            float x2 = mesh.pos[at + 6];
+            float y2 = mesh.pos[at + 7];
+            float z2 = mesh.pos[at + 8];
+            float cx = (x0 + x2) * 0.5F;
+            float cy = (y0 + y2) * 0.5F;
+            float cz = (z0 + z2) * 0.5F;
+            // 背面剔除：法线背着相机的那一面永远看不见
+            if (normal[0] * (drawEye.x - cx) + normal[1] * (drawEye.y - cy)
+                    + normal[2] * (drawEye.z - cz) <= 0.0) {
+                continue;
+            }
+            if (!project(mesh.pos[at], mesh.pos[at + 1], mesh.pos[at + 2], sa)
+                    || !project(mesh.pos[at + 3], mesh.pos[at + 4], mesh.pos[at + 5], sb)
+                    || !project(x2, y2, z2, sc)
+                    || !project(mesh.pos[at + 9], mesh.pos[at + 10], mesh.pos[at + 11], sd)) {
+                continue;
+            }
+            float bx0 = Math.min(Math.min(sa[0], sb[0]), Math.min(sc[0], sd[0]));
+            float bx1 = Math.max(Math.max(sa[0], sb[0]), Math.max(sc[0], sd[0]));
+            float by0 = Math.min(Math.min(sa[1], sb[1]), Math.min(sc[1], sd[1]));
+            float by1 = Math.max(Math.max(sa[1], sb[1]), Math.max(sc[1], sd[1]));
+            if (bx1 < -CULL_MARGIN || bx0 > width + CULL_MARGIN
+                    || by1 < -CULL_MARGIN || by0 > height + CULL_MARGIN) {
+                continue;
+            }
+            // 屏幕上不到一个像素的面不提交：远景一栋楼几万个面，这一步能省掉一多半
+            if ((bx1 - bx0) * (by1 - by0) < 1.4F) continue;
+            // 深度键按"面下标"存：下面的快排是拿 order[k] 去取 key 的
+            surfaceDepth[i] = (sa[2] + sb[2] + sc[2] + sd[2]) * 0.25F;
+            int sc0 = i * 8;
+            surfaceScreen[sc0] = sa[0];
+            surfaceScreen[sc0 + 1] = sa[1];
+            surfaceScreen[sc0 + 2] = sb[0];
+            surfaceScreen[sc0 + 3] = sb[1];
+            surfaceScreen[sc0 + 4] = sc[0];
+            surfaceScreen[sc0 + 5] = sc[1];
+            surfaceScreen[sc0 + 6] = sd[0];
+            surfaceScreen[sc0 + 7] = sd[1];
+            surfaceOrder[n++] = i;
+        }
+        sort(surfaceOrder, surfaceDepth, n);
+
+        for (int k = 0; k < n; k++) {
+            int i = surfaceOrder[k];
+            int at = i * 12;
+            float floorY = mesh.floorY[i];
+            // 刚被扫到的那一层还没长实：给一点过渡，别像开关一样跳
+            float appear = scan ? Mth.clamp((sweep - floorY) / feather, 0.0F, 1.0F) : 1.0F;
+            if (appear <= 0.01F) continue;
+            float lead = scan ? Mth.clamp(1.0F - (sweep - floorY) / leadSpan, 0.0F, 1.0F) : 0.0F;
+            int a = (int) (255.0F * alpha * (0.40F + 0.60F * appear));
+            if (a <= 2) continue;
+            int glowColor = (a << 24) | (SiteBlueprint.GOLD_BRIGHT & 0xFFFFFF);
+            int sc0 = i * 8;
+            for (int v = 0; v < 4; v++) {
+                int base = mesh.color[i * 4 + v];
+                int rgb = lead > 0.01F ? mix(base, SiteBlueprint.GOLD_BRIGHT, lead * 0.55F) : base;
+                // 每顶点一个颜色：面内的明暗差（墙角遮蔽）就靠它
+                int argb = (a << 24) | (rgb & 0xFFFFFF);
+                c.addVertex(surfaceScreen[sc0 + v * 2], surfaceScreen[sc0 + v * 2 + 1], 0.0F)
+                        .setColor(argb);
+            }
+            if (lead > 0.5F) {
+                // 扫过平面的那一层再叠一道极淡的金，像"正在打印"
+                for (int v = 0; v < 4; v++) {
+                    c.addVertex(surfaceScreen[sc0 + v * 2], surfaceScreen[sc0 + v * 2 + 1], 0.0F)
+                            .setColor(glowColor & 0x22FFFFFF);
+                }
+            }
+        }
+
+        // 扫描框跟着 D 段的高度走（就是"从下到上"那道框）；金线由 drawBlueprint 统一画，别重复
+        if (scan) {
+            drawScanRing(c, blueprint, sweep, alpha);
+        }
+        if (!surfaceReported) {
+            surfaceReported = true;
+            YardSiteLog.debug("落成面表：" + mesh.describe() + "，扫描 " + (scan ? "开" : "关")
+                    + "，屏幕内 " + n + " 面");
+        }
+    }
+
+    /**
+     * 扫描高度那一圈亮框：把"正在长到这里"这件事说出来。
+     *
+     * <p>画在占地外沿再往外 0.4 格，这样它不会埋在墙里；四段横片，宽度按对角看也够粗。
+     */
+    private void drawScanRing(VertexConsumer c, SiteBlueprint blueprint, float y, float alpha) {
+        int a = (int) (255.0F * alpha * 0.85F);
+        if (a <= 2) return;
+        int argb = (a << 24) | SiteBlueprint.GOLD_BRIGHT;
+        float out = 0.45F;
+        float w = 0.14F;
+        float x0 = blueprint.plotMinX - out;
+        float x1 = blueprint.plotMaxX + out;
+        float z0 = blueprint.plotMinZ - out;
+        float z1 = blueprint.plotMaxZ + out;
+        flat(c, x0, x1, z0, z0 + w, y, argb);
+        flat(c, x0, x1, z1 - w, z1, y, argb);
+        flat(c, x0, x0 + w, z0, z1, y, argb);
+        flat(c, x1 - w, x1, z0, z1, y, argb);
+    }
+
+    private void ensureSurfaceBuffers(int n) {
+        if (surfaceOrder.length >= n) return;
+        int size = Math.max(1024, Integer.highestOneBit(n - 1) << 2);
+        surfaceOrder = new int[size];
+        surfaceDepth = new float[size];
+        surfaceScreen = new float[size * 8];
     }
 
     // ── 落点标：精读那帧上的金十字和占地框，开场按 1−进度收掉 ────────────
@@ -1176,7 +1597,6 @@ final class SiteRevealWorldRenderer {
         float raw = rawTop(ci, cj);
         // 精读里那些竖向余量是按模型单位给的，换算回方块再走同一套压缩才和画出来的一致
         float plate = drawY(raw + 0.012F * heightUnitBlocks, growth);
-        float lipTop = drawY(raw + 0.032F * heightUnitBlocks, growth);
         // 占地框和选区图上那块金框同一个矩形（门廊往 -z 侧多让几格，中心不在盒子正中）；
         // 独立安装没有占地，只画落点十字
         SitePlan.Plot plot = SiteText.plot();
@@ -1190,23 +1610,20 @@ final class SiteRevealWorldRenderer {
             int fill = ((int) (0x4C * a) << 24) | (GOLD & 0xFFFFFF);
             int lip = ((int) (0xB0 * a) << 24) | (GOLD & 0xFFFFFF);
             flat(c, x0, x1, z0, z1, plate, fill);
-            float lipH = Math.max(0.5F, lipTop - plate);
-            edge(c, x0, z0, x1, z0, plate, lipH, lip);
-            edge(c, x1, z0, x1, z1, plate, lipH, lip);
-            edge(c, x1, z1, x0, z1, plate, lipH, lip);
-            edge(c, x0, z1, x0, z0, plate, lipH, lip);
+            float lw = lineWidthPx();
+            line(c, x0, plate, z0, x1, plate, z0, lip, lw);
+            line(c, x1, plate, z0, x1, plate, z1, lip, lw);
+            line(c, x1, plate, z1, x0, plate, z1, lip, lw);
+            line(c, x0, plate, z1, x0, plate, z0, lip, lw);
         } else {
             flat(c, intro.siteX() - 2.5F, intro.siteX() + 2.5F, intro.siteZ() - 2.5F,
                     intro.siteZ() + 2.5F, plate, ((int) (0x4C * a) << 24) | (GOLD & 0xFFFFFF));
         }
-        // 落点十字：精读里它是从底面立到柱顶之上的两根薄片，任意角度都看得见
-        float bar = 0.012F * (float) orthoBlocksPerUnit;
+        // 落点十字：一根从底面立到柱顶之上的金线，任意角度都看得见
         int gold = ((int) (0xFF * a) << 24) | (GOLD & 0xFFFFFF);
         float pinTop = drawY(raw + 0.16F * heightUnitBlocks, growth);
-        edge(c, intro.siteX() - bar, intro.siteZ(), intro.siteX() + bar, intro.siteZ(),
-                baseY, pinTop - baseY, gold);
-        edge(c, intro.siteX(), intro.siteZ() - bar, intro.siteX(), intro.siteZ() + bar,
-                baseY, pinTop - baseY, gold);
+        line(c, intro.siteX(), baseY, intro.siteZ(), intro.siteX(), pinTop, intro.siteZ(),
+                gold, lineWidthPx() + 0.4F);
     }
 
     // ── 投影 / 顶点 ─────────────────────────────────────────────────────
@@ -1281,9 +1698,95 @@ final class SiteRevealWorldRenderer {
         c.addVertex(qd[0], qd[1], 0.0F).setColor(bottom);
     }
 
-    private void edge(VertexConsumer c, float ax, float az, float bx, float bz,
-                      float y, float height, int argb) {
-        quad(c, ax, y, az, bx, y, bz, bx, y + height, bz, ax, y + height, az, argb);
+    // ── 线：屏幕空间、像素常数宽 ─────────────────────────────────────────
+
+    /**
+     * 一条世界坐标的直线，画成<b>屏幕上固定像素宽</b>的一条。
+     *
+     * <p>做法：两端投影到屏幕，取屏幕方向的法线，按半个线宽往两侧各偏一点做成一个窄四边形。
+     * 好处是远近一样粗、永远抗锯齿得过（不会被栅格化成一串断点），也不像世界坐标薄片那样
+     * 推进到门口时突然变粗。
+     *
+     * <p>端点在相机背后时按近平面裁一刀（不裁的话投出来的坐标会翻到屏幕另一侧，
+     * 出现一条横穿画面的怪线）。
+     */
+    private void line(VertexConsumer c, float x1, float y1, float z1, float x2, float y2, float z2,
+                      int argb, float widthPx) {
+        line(c, x1, y1, z1, x2, y2, z2, argb, widthPx, lineGlow);
+    }
+
+    private void line(VertexConsumer c, float x1, float y1, float z1, float x2, float y2, float z2,
+                      int argb, float widthPx, boolean glow) {
+        float ax = x1;
+        float ay = y1;
+        float az = z1;
+        float bx = x2;
+        float by = y2;
+        float bz = z2;
+        double d1 = depth(ax, ay, az);
+        double d2 = depth(bx, by, bz);
+        if (d1 <= NEAR_PLANE && d2 <= NEAR_PLANE) return;
+        if (d1 <= NEAR_PLANE) {
+            float t = (float) ((NEAR_PLANE - d1) / (d2 - d1));
+            ax += (bx - ax) * t;
+            ay += (by - ay) * t;
+            az += (bz - az) * t;
+        } else if (d2 <= NEAR_PLANE) {
+            float t = (float) ((NEAR_PLANE - d2) / (d1 - d2));
+            bx += (ax - bx) * t;
+            by += (ay - by) * t;
+            bz += (az - bz) * t;
+        }
+        if (!project(ax, ay, az, la) || !project(bx, by, bz, lb)) return;
+        float sx1 = la[0];
+        float sy1 = la[1];
+        float sx2 = lb[0];
+        float sy2 = lb[1];
+        float dx = sx2 - sx1;
+        float dy = sy2 - sy1;
+        float len = (float) Math.sqrt(dx * dx + dy * dy);
+        float half = Math.max(0.35F, widthPx * 0.5F);
+        // 整条线在屏幕外就不提交（一栋楼几千条线，先按屏幕框筛一遍）
+        if (Math.max(sx1, sx2) + half * GLOW_SCALE < 0 || Math.min(sx1, sx2) - half * GLOW_SCALE > width
+                || Math.max(sy1, sy2) + half * GLOW_SCALE < 0
+                || Math.min(sy1, sy2) - half * GLOW_SCALE > height) {
+            return;
+        }
+        if (len < 0.0001F) return;      // 退化成一个点：没有方向，跳过（正好在相机上）
+        float nx = -dy / len;
+        float ny = dx / len;
+        int rgb = argb & 0xFFFFFF;
+        int alpha = argb >>> 24;
+        if (glow) {
+            // 很淡的一层同色晕：细线在深色地形上也看得清，边缘看起来是"软"的而不是锯齿
+            int glowAlpha = alpha * 16 / 100;
+            if (glowAlpha > 0) {
+                emitLineQuad(c, sx1, sy1, sx2, sy2, nx, ny, half * GLOW_SCALE, (glowAlpha << 24) | rgb);
+            }
+        }
+        emitLineQuad(c, sx1, sy1, sx2, sy2, nx, ny, half, argb);
+    }
+
+    private static void emitLineQuad(VertexConsumer c, float x1, float y1, float x2, float y2,
+                                     float nx, float ny, float half, int argb) {
+        float ox = nx * half;
+        float oy = ny * half;
+        c.addVertex(x1 + ox, y1 + oy, 0.0F).setColor(argb);
+        c.addVertex(x2 + ox, y2 + oy, 0.0F).setColor(argb);
+        c.addVertex(x2 - ox, y2 - oy, 0.0F).setColor(argb);
+        c.addVertex(x1 - ox, y1 - oy, 0.0F).setColor(argb);
+    }
+
+    /** 线宽（界面像素）：配置里那一项，夹在 0.5～4（太细看不见、太粗就糊成一片）。 */
+    private float lineWidthPx() {
+        return Mth.clamp(lineWidth, 0.5F, 4.0F);
+    }
+
+    private static int mix(int from, int to, float t) {
+        int r = (int) Mth.lerp(t, (float) ((from >> 16) & 255), (float) ((to >> 16) & 255));
+        int g = (int) Mth.lerp(t, (float) ((from >> 8) & 255), (float) ((to >> 8) & 255));
+        int b = (int) Mth.lerp(t, (float) (from & 255), (float) (to & 255));
+        return (r << 16) | (g << 8) | b;
     }
 
     private static int shade(int rgb, float factor, int alpha) {

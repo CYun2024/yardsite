@@ -75,9 +75,11 @@ tasks.processResources {
 //   · 单独仓库：<repo>/                  → 取 <repo>/libs/
 val sodiumName = "sodium-neoforge-0.8.13+mc1.21.1-mod.jar"
 val sodiumJar = listOf(
-    rootProject.projectDir.parentFile.resolve(".deps/$sodiumName"),   // monorepo: yard/.deps
-    rootProject.projectDir.resolve("libs/$sodiumName"),               // 独立仓库: libs/
-    rootProject.projectDir.resolve(".deps/$sodiumName"),              // 独立仓库: .deps/
+    // monorepo：<repo>/yardcreator/site → 依赖在 <repo>/.deps（上两级，不是上一级）
+    rootProject.projectDir.parentFile.parentFile.resolve(".deps/$sodiumName"),
+    rootProject.projectDir.parentFile.resolve(".deps/$sodiumName"),
+    rootProject.projectDir.resolve("libs/$sodiumName"),
+    rootProject.projectDir.resolve(".deps/$sodiumName"),
 ).firstOrNull { it.isFile }
 
 dependencies {
@@ -95,6 +97,20 @@ if (sodiumJar == null) {
         resources {
             // 配置里列的类没编进来的话，运行时会报一串"找不到 mixin"，干脆一起不带
             exclude("yardsite.sodium.mixins.json")
+        }
+    }
+    // 但 mods.toml 里那条 [[mixins]] 也得一起去掉：声明的配置文件不存在，
+    // NeoForge 在 mixin 引导阶段直接抛异常 —— 表现就是"启动就崩"，日志停在 mixin 版本那几行。
+    tasks.processResources {
+        doLast {
+            val file = layout.buildDirectory.file("resources/main/META-INF/neoforge.mods.toml").get().asFile
+            if (file.isFile) {
+                val text = file.readText()
+                val stripped = text.replace(
+                    Regex("#!sodium-mixin-begin.*?#!sodium-mixin-end[ \\t]*\\r?\\n?",
+                        RegexOption.DOT_MATCHES_ALL), "")
+                if (stripped != text) file.writeText(stripped)
+            }
         }
     }
 }

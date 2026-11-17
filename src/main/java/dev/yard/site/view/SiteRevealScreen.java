@@ -6,6 +6,7 @@ import dev.yard.site.client.RevealCinematics;
 import dev.yard.site.api.SiteLink;
 import dev.yard.site.api.SiteLinks;
 import dev.yard.site.api.SitePlan;
+import dev.yard.site.structure.SchematicSite;
 import dev.yard.site.worldgen.SiteRevealState;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -208,18 +209,18 @@ public class SiteRevealScreen extends Screen {
         this.world = new SiteRevealWorldRenderer(relief, initial, intro);
         if (plan != null) {
             this.blueprint = blueprintOf(plan);
-            this.blueprintAt = openedAt + SiteRevealWorldRenderer.INTRO_MS;
+            this.world.fitBounds(this.blueprint);
         }
         YardSiteLog.debug("落成动画开始：落点 x=" + siteX + " z=" + siteZ
                 + "，开场接着精读那张图往透视推"
                 + (plan == null ? "（等真实落点）" : ""));
     }
 
-    /** 施工线框：有联动方才有盒子；独立安装返回 null（不画）。 */
+    /** 施工线框：有联动方才有几何/盒子；独立安装返回 null（不画）。 */
     private static SiteBlueprint blueprintOf(SitePlan plan) {
         SiteLink link = SiteLinks.get();
         if (link == null || !plan.hasPlot()) return null;
-        return SiteBlueprint.of(plan, link.blueprint(plan));
+        return SiteBlueprint.of(plan, link.blueprint(plan), link.blueprintLines(plan));
     }
 
     /** 真实落点还没到时用的临时计划：以点击处为落点，高度取预读地表。 */
@@ -304,7 +305,9 @@ public class SiteRevealScreen extends Screen {
             // 真实落点到了：只把镜头终点偏过去，开场进度和换源状态都不动，镜头不会重新飞一遍
             world.retargetPlan(plan);
             blueprint = blueprintOf(plan);
-            blueprintAt = now;
+            world.fitBounds(blueprint);
+            // 时钟不在这里起算：C 段一律等"透视变化"走完（见下面的 blueprintAt 判定），
+            // 中途换几何只是换了一份画什么，不该把已经长出来的东西打回地基
             YardSiteLog.debug("读到服务端落点：" + (plan.hasPlot() ? "占地中心" : "出生点")
                     + " x=" + plan.plotCenterX()
                     + " z=" + plan.plotCenterZ() + (blueprint == null ? "" : "，线框开始生长"));
@@ -316,6 +319,14 @@ public class SiteRevealScreen extends Screen {
             YardSiteLog.debug("客户端有世界了（点创建后 " + (now - openedAt) + " ms），交给真世界");
         }
         world.tick(this.minecraft, now);
+        // C 段（蓝图从地基往上长）必须等透视变化彻底走完再开始。
+        // 以前是 openedAt + INTRO_MS，可 intro 的进度是按帧累加、单帧封顶 50ms 的：
+        // 建世界那几秒帧很长，墙上过了 3 秒它可能才走到一半，于是 C 在正射画面里就开始了。
+        if (blueprint != null && blueprintAt == 0L && world.introDone()) {
+            blueprintAt = now;
+            YardSiteLog.debug("透视变化走完，蓝图开始生长（点创建后 " + (now - openedAt) + " ms，"
+                    + blueprint.durationMs + " ms 长完并落定）");
+        }
         if (descendAt != 0L) {
             // 落机进度自己按帧累加（单帧封顶）：卡帧只让镜头少走一点，不会"瞬移一段"
             long gap = descendLastAt == 0L ? 0L : Math.max(0L, now - descendLastAt);
@@ -345,7 +356,11 @@ public class SiteRevealScreen extends Screen {
                 boolean gateSettled = gateAreaReady
                         || (allReadyAt != 0L && now - allReadyAt >= GATE_GRACE_MS);
                 boolean timeout = now - aerialAt >= REVEAL_READY_CAP_MS;
-                if ((all && gateSettled) || timeout) {
+                // 区块可能比蓝图先就位：落机必须等 C（生长）→ 停 1 秒 → D（落定）整条走完，
+                // 不然镜头已经开始往下降、模型才长到一半，交接顺序就乱了
+                long bpEnd = blueprintEndAt();
+                boolean bpReady = bpEnd == 0L || now >= bpEnd;
+                if (((all && gateSettled) || timeout) && bpReady) {
                     // 先让剩下的沙盘一次性散干净，散完才动镜头（不然远处还立着柱子，镜头一挪就穿帮）
                     collapseAt = now;
                     world.beginCollapse();
@@ -355,6 +370,7 @@ public class SiteRevealScreen extends Screen {
                             + (timeout ? "，等到上限" : "")
                             + "，门口那片" + (gateAreaReady ? "已上屏"
                                     : "未就位、按宽限 " + settle + " ms 放行")
+                            + "，蓝图" + (bpEnd == 0L ? "（无）" : (now >= bpEnd ? "已落定" : "未完成"))
                             + "，点创建后 " + (now - openedAt) + " ms），开始收尾消散");
                 }
             } else if (world.allReady()) {
@@ -463,7 +479,26 @@ public class SiteRevealScreen extends Screen {
         java.util.List<Vec3> points = new java.util.ArrayList<>(4);
         java.util.List<Double> speeds = new java.util.ArrayList<>(3);
         points.add(aerial);
-        if (plan.hasPlot() && plan.plot() != null) {
+        // 结构模式：出口在哪一侧由投影文件自己算（门在哪就往哪边绕），不能再用「前墙在 originZ」那套
+        int frontSide = SchematicSite.frontSide();
+        if (plan.hasPlot() && plan.plot() != null && frontSide >= 0) {
+            double dx = frontSide == 0 ? 1.0D : frontSide == 1 ? -1.0D : 0.0D;
+            double dz = frontSide == 2 ? 1.0D : frontSide == 3 ? -1.0D : 0.0D;
+            // 门外一点：从出生点沿出口方向退到墙外，眼高
+            Vec3 outside = new Vec3(spawn.getX() + 0.5D + dx * APPROACH_BACK, eyeY,
+                    spawn.getZ() + 0.5D + dz * APPROACH_BACK);
+            Vec3 high = new Vec3(outside.x + dx * APPROACH_LEAN,
+                    plan.originY() + plan.plot().height() + APPROACH_ABOVE,
+                    outside.z + dz * APPROACH_LEAN);
+            points.add(high);
+            speeds.add(SPEED_AIR);
+            points.add(outside);
+            speeds.add(SPEED_DROP);
+            points.add(eyeAtSpawn);
+            speeds.add(SPEED_DOOR);
+            this.pathNote = "结构出口朝 " + (dx > 0 ? "+x" : dx < 0 ? "-x" : dz > 0 ? "+z" : "-z")
+                    + "，门外那一点 " + fmt(outside.x) + "," + fmt(outside.z);
+        } else if (plan.hasPlot() && plan.plot() != null) {
             double axisX = gateAxisX(mc.level, spawn, plan.originZ());
             double frontZ = plan.originZ() - APPROACH_BACK;
             Vec3 front = new Vec3(axisX, eyeY, frontZ);
@@ -732,6 +767,18 @@ public class SiteRevealScreen extends Screen {
         return Mth.clamp(descendClockMs / descendMs, 0.0F, 1.0F);
     }
 
+    /**
+     * 蓝图整条时间轴的结束时刻（{@code 0} = 没有蓝图）：C 长完 + 停 1 秒 + D 落定。
+     * 落机（交接真实区块）要等它，顺序才是先长、再停、再落定、最后才交给真方块。
+     */
+    private long blueprintEndAt() {
+        if (blueprint == null) return 0L;
+        // 透视还没走完（C 还没开始）：这里返回一个"永远不到"的时刻，落机就一直等，
+        // 不会出现"模型还没长，镜头先下去"的错序
+        if (blueprintAt == 0L) return Long.MAX_VALUE;
+        return blueprintAt + blueprint.durationMs;
+    }
+
     private static float smooth(float t) {
         return t * t * (3.0F - 2.0F * t);
     }
@@ -758,7 +805,14 @@ public class SiteRevealScreen extends Screen {
             // 柱子已经全部淡完（落机前就成立）时整段沙盘都不用再提交：这里是收尾每帧白画的活，
             // 一万六千格遍历 + 排序 + GUI 批量 flush，落机期间一个像素都不会变
             boolean sandboxGone = descendAt != 0L && world.allReady();
-            if (!sandboxGone && (descendAt == 0L || descend < 1.0F) && alpha > 0.001F) {
+            // 交接真实区块（落机开始）之后，建筑效果还要在原地和真方块叠 1 秒再化掉：
+            // 沙盘柱子已经散干净了也得继续提交，不能跟着 sandboxGone 一起停
+            // 交接时刻 = 真区块开始上屏（沙盘开始散）那一刻，不是落机开始：
+            // 落机本身要等所有区块就位，从那儿起算会让建筑效果"区块都交接完了才慢慢消失"
+            long handoverMs = collapseAt == 0L ? -1L : frameNow - collapseAt;
+            boolean effectAlive = SiteRevealWorldRenderer.buildAlpha(handoverMs) > 0.002F
+                    && blueprint != null && blueprintAt != 0L;
+            if (effectAlive || (!sandboxGone && (descendAt == 0L || descend < 1.0F) && alpha > 0.001F)) {
                 if (descendAt != 0L && this.minecraft != null && this.minecraft.player != null) {
                     // 落机时柱子必须跟着真世界相机一起插值，最后整体淡掉；最后几块没撤掉也不会“啪”地消失
                     Vec3 vanillaEye = this.minecraft.player.getEyePosition(partialTick);
@@ -772,7 +826,8 @@ public class SiteRevealScreen extends Screen {
                 }
                 long bpElapsed = blueprint == null || blueprintAt == 0L ? -1L : frameNow - blueprintAt;
                 long w0 = System.nanoTime();
-                world.render(g, this.width, this.height, frameNow, blueprint, bpElapsed, alpha);
+                world.render(g, this.width, this.height, frameNow, blueprint, bpElapsed, alpha,
+                        handoverMs);
                 worldNs = System.nanoTime() - w0;
             }
         }
