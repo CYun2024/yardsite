@@ -2,41 +2,36 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-Yard Site adds a map to the *Create New World* screen. You pick a spot on it, and the world is
-generated around that spot instead of wherever the game would have put you.
+Select a spawn point or building site before world creation, and play a reveal animation before entering the world.
 
-The map is drawn from the world generator itself: terrain height and biome colours, sampled on the
-client without loading chunks. You start with the whole region, then zoom in to one cell per chunk
-and click the cell you want. Pressing *Create World* plays a short camera move instead of the usual
-loading bar: the map tilts away, circles the area while the nearby chunks arrive, then dissolves as
-the camera drops to your spawn point.
+## Overview
 
-## Using it
+- **Selection map**: Displayed when creating a new single-player world. Provides a 3D terrain and biome sandbox for choosing a spawn point over a wide area.
+- **Chunk detail view**: Each cell represents one real chunk, allowing the site to be placed on chunk boundaries.
+- **Reveal animation**: After the site is confirmed, the camera flies from the sandbox view to the site. The building is generated as a gold wireframe and then as surface geometry, after which the real terrain takes over.
+- **Structure mode**: Uses a `.litematic`, `.nbt` or `.schem` file as the site target. Footprint, spawn point, reveal animation and the actual building are all derived from that file.
 
-1. Go to *Create New World* as usual. The map opens before the world does.
-2. Click a cell to place the marker, or double-click to open chunk view first. In chunk view one cell
-   is one whole chunk, and that chunk is what actually decides the spawn.
-3. Press *Confirm and Create*.
+## Usage
 
-Changing the seed redraws the map. Going back without picking anything creates the world the normal
-way.
+1. Select "Create New World". The selection map is displayed.
+2. Choose an approximate position on the large sandbox. Double-click or select "Enter Chunk Detail" to choose the site by chunk.
+3. Select "Confirm and Create" to play the reveal animation and create the world.
 
-## With and without the Yard mods
+If the map is dismissed without a selection, the world is created with the vanilla spawn procedure. Changing the world seed causes the selection map to be sampled again.
 
-On its own, the picked cell becomes your spawn point. Once the spawn chunks are generated, the Y
-value is checked against the real heightmap, so a tree or a snow layer at that spot will not leave
-you standing inside it.
+## Reveal animation
 
-With a Yard-series mod installed (`yardcore` and the rest), the same cell becomes a yard plot. The
-Yard mod plans the building origin around it and puts the spawn inside the yard, and the camera move
-draws the building as a wireframe on the way down.
+- **Camera transition**: Uses the fixed field of view of the final aerial position. Approach is performed by camera translation; distance is interpolated logarithmically, with a mid-flight lift to clear high terrain.
+- **Gold wireframe phase**: The wireframe is generated from the structure's crease edges, lit from bottom to top, with hidden-line removal based on the current camera position. When installed with the Yard series, the inn's wireframe is displayed.
+- **Surface phase**: Structure mode only. The building is drawn from baked block models, filled from bottom to top with a scan frame.
+- **Automatic framing**: Camera distance is derived from the content bounding box; structure mode uses the structure geometry.
+- **Handover and fade**: After the real terrain takes over, the building effect remains for a configurable delay and then fades in place.
 
-Neither side requires the other. Install one, the other, or both.
+The reveal animation (`site.revealAnim`) or the surface phase (`site.revealSurface`) can be disabled in the configuration.
 
-## Pointing it at a schematic
+## Structure mode
 
-If you already have a finished building, turn on `structure.enabled` and point it at a schematic.
-The whole flow switches to "put this building in the world":
+Enable `structure.enabled` to display the structure footprint on the selection map and use the structure as the basis for the reveal animation and world generation.
 
 ```toml
 [structure]
@@ -46,145 +41,83 @@ The whole flow switches to "put this building in the world":
 	mirror = "NONE"     # NONE / X / Z / XZ
 ```
 
-What changes:
+- Supported formats: `.litematic`, `.nbt`, `.schem`. No projection mod is required.
+- When `structure.file` is empty, the first readable file in `config/yardsite/structures/` is used.
+- Geometry is generated from baked block models. Connection states for fences, walls, glass panes and stairs are taken from the block states in the file; colors are sampled from block textures.
+- The footprint can be flattened before placement (`structure.flatten`); the spawn point is a standable block inside the structure, near a door.
+- Rotation, mirror and offset apply to the footprint, spawn point, reveal animation and the actual blocks.
+- In the selection map, press T to rotate 90° clockwise and M to cycle the mirror mode. These changes apply only to the current world creation and are not written to the configuration.
+- When installed with the Yard series, structure mode takes priority and only one building is generated.
 
-- the gold box on the map is the structure's footprint, read from the file (after rotation/mirror);
-- the camera move draws its **outline**: lines light up from the foundation to the roof, instead of
-  a handful of stand-in boxes;
-- once you are in the world, the mod places the blocks itself. The spawn point is a cell inside the
-  structure that you can actually stand in, closest to the door, and the camera comes in from that side;
-- slopes, shorelines and trees are levelled out first (foundation filled in, plot volume cleared), so
-  the building is not half buried.
+## Yard series compatibility
 
-Formats: `.litematic` (Litematica), `.nbt` (vanilla structure block) and `.schem`
-(WorldEdit / Sponge). **No schematic mod is required**: all three are just gzipped NBT, read here
-directly. Litematica and WorldEdit are not dependencies.
-
-The outline goes through real **hidden line removal**: every crease edge of the structure is listed,
-then each one is asked "looking from the camera, is the first thing I hit this edge?" — if yes it is
-drawn, if something is in front the stretch is dropped, and a half-hidden edge keeps only its visible
-half. In practice:
-
-- the three edges at the bottom back corner of a cube are not drawn (you cannot see them in a solid
-  render either);
-- stack two boxes offset from each other and the lower one's covered stretch disappears while the
-  exposed stretch stays;
-- orbit the camera and lines behind walls drop out, then come back.
-
-**Geometry goes below block resolution**: every block is split into the boxes of its real shape before
-edges are taken, so stairs are steps, slabs are half height, trapdoors are 3/16 thick, panes are the
-thin sheet in the middle, fences are a post plus rails. The wireframe and the occlusion use the same
-boxes, which is why a half-height slab only hides the lower half of the pillar behind it. Cross-model
-plants (grass, flowers, vines) are skipped entirely — no lines, no occlusion.
-
-Lines come in three weights, chosen by the **role an edge plays in the shape**, not by its length:
-
-- **outline**: a convex edge whose two outward normals now face the camera on one side and away on the
-  other — a silhouette edge. Thickest and brightest. This tier is *per-view*: turn the camera and last
-  view's outline falls back to a structure line while a new one takes over;
-- **structure**: convex but not a silhouette (stair treads, wall edges, block rims seen from inside);
-- **detail**: concave corners (reveals of a doorway, bottom of a groove) plus the edges of thin plates —
-  panes, trapdoors, carpets, signs.
-
-Tiering by role instead of length means a continuous edge never jumps between weights as the camera
-moves, and a slab or a single stair tread (0.5 thick) is a convex edge just like a wall edge, so the
-outline stays connected.
-
-On top of that there is a **screen-space cut**: edges projecting to less than 3.5 pixels are not drawn.
-Half-block panes and railings are two or three pixels from a distance and would just be noise up close
-they are still there — the drawing simplifies itself as you pull back.
-
-Orientation is a config value, not a re-export: `rotation` / `mirror` rotate the footprint, the spawn
-point, the outline and the placed blocks together, including stair and door facing (block states are
-mirrored and rotated too).
-
-On the map screen, **T** rotates 90° clockwise and **M** cycles the mirror (none → X → Z → XZ). Those
-only affect the current world creation and are not written back to the config — try the orientation
-against the terrain first, then copy the value into the toml.
-
-Leaving `structure.file` **empty** is fine: the first readable file in `config/yardsite/structures/`
-(`.litematic` / `.nbt` / `.schem`) is used, so a pack author can just drop the building in that folder.
-If that folder has nothing either, nothing is projected and the map screen says "No structure file
-set" — that is a hint, not an error, and nothing else gets placed behind your back.
-
-If a Yard-series mod is installed as well, structure mode wins — two buildings are never placed on
-top of each other.
-
-## Biome mods
-
-Biomes are read from the same biome source the world uses, and TerraBlender is handled explicitly.
-Mods that register their biomes through TerraBlender, such as Terralith, show up on the map
-correctly. Other biome mods have not been tested one by one; most should work for the same reason.
-A mod that adds biomes after world generation has run may still show the base biome on the map.
+- With this mod installed alone, the selected position is used as the spawn point.
+- When installed with the Yard series, the selected position is used as the yard plot; the Yard series plans the building and spawn point.
+- Neither side requires the other; both can be installed separately or together.
 
 ## Requirements
 
-- Minecraft 1.21.1, NeoForge 21.1.x, Java 21
-- No required dependencies; schematic formats are parsed in-house, no Litematica/WorldEdit needed
-- Sodium is optional. With it, real terrain stays hidden until each chunk column is actually being
-  drawn, so it cannot show through the map. Without it everything still works, the hand-off is just
-  a little rougher.
-- A Yard-series mod is optional and only adds the plot mode
+- Minecraft 1.21.1, NeoForge 21.1.x, Java 21.
+- No required dependencies. Projection files are parsed by this mod.
+- Sodium is optional. When installed, the handover between real terrain and the sandbox is more precise; without it, functionality is unaffected.
+- Applies to single-player and LAN world creation only. Dedicated servers do not have this flow.
 
-## Config
+## Configuration
 
-`config/yardsite-common.toml`:
+Configuration file: `config/yardsite-common.toml`.
 
-| Key | Default | What it does |
+| Key | Default | Description |
 |---|---|---|
-| `site.spawnSiteSelect` | `true` | show the map at all; `false` keeps vanilla spawn behaviour |
-| `site.selectRadius` | `2000` | map size, ±N blocks around the spawn area |
-| `site.sampleThreads` | `0` | sampling threads; `0` means half the CPU cores |
-| `site.spawnChunkRadius` | `3` | spawn chunk radius kept loaded after you enter |
-| `site.earlyEntry` | `false` | log in early and keep generating chunks afterwards |
-| `site.revealAnim` | `true` | the camera move; `false` keeps the vanilla loading screen |
-| `site.revealSurface` | `true` | draw the reveal as surfaces instead of lines (structure mode: a small model with all decorations) |
-| `site.revealSurfaceScan` | `true` | gold lines grow up first (C), hold 2 s, then surfaces fill the wireframe from the bottom up (D); `false` shows the whole model at once |
-| `site.revealFadeDelayMs` | `1000` | how long the building effect stays after the **center chunk** takes over before fading out (ms); no longer waits for every chunk |
-| `site.revealLineWidth` | `1.5` | outline line width in GUI pixels (distance independent); only used when `revealSurface=false` |
-| `site.revealLineGlow` | `true` | soft halo around the lines; turn off on weak GPUs |
-| `structure.enabled` | `false` | use a schematic as the site target (see above) |
-| `structure.file` | `""` | schematic path, relative to the game directory. Empty = first file in `config/yardsite/structures/` |
-| `structure.rotation` | `NONE` | clockwise rotation: NONE / CW90 / CW180 / CW270 |
-| `structure.mirror` | `NONE` | mirror before rotating: NONE / X / Z / XZ |
-| `structure.offsetX/Y/Z` | `0` | shift the whole structure a few blocks (for aligning) |
-| `structure.place` | `true` | `false` = draw the outline only, place nothing |
-| `structure.flatten` | `true` | level the plot before placing |
-| `structure.maxVoxels` | `4000000` | largest structure volume that will be read |
-| `structure.maxLines` | `12000` | outline line budget; the longest lines are kept |
-| `structure.showInfo` | `false` | show the structure info line on the map screen |
+| `site.spawnSiteSelect` | `true` | Display the selection screen when creating a new world; disable to use the vanilla spawn procedure |
+| `site.selectRadius` | `2000` | Selection map radius (blocks) |
+| `site.selectRadiusEpic` | `8000` | Selection map radius for Epic Terrain (blocks) |
+| `site.sandboxColumns` | `256` | Maximum number of columns per side of the selection map |
+| `site.sampleThreads` | `0` | Sampler thread count; 0 for automatic |
+| `site.spawnChunkRadius` | `3` | Spawn chunk radius kept loaded after entering the world |
+| `site.earlyEntry` | `false` | Enter the world after waiting for 9 spawn chunks only |
+| `site.instantReveal` | `false` | Disable the growth animation of selection map columns |
+| `site.revealAnim` | `true` | Play the reveal animation before entering the world |
+| `site.revealSurface` | `true` | Draw the building as surface geometry during the reveal |
+| `site.revealSurfaceScan` | `true` | Fill the surface from bottom to top with a scan frame |
+| `site.revealFadeDelayMs` | `1000` | Time the building effect remains after the center chunk hands over (ms) |
+| `site.revealLineWidth` | `1.5` | Gold wireframe width (GUI pixels) |
+| `site.revealLineGlow` | `true` | Glow around the gold wireframe |
+| `structure.enabled` | `false` | Enable structure mode |
+| `structure.file` | `""` | Structure file path; empty for automatic selection |
+| `structure.rotation` | `NONE` | Clockwise rotation applied on placement |
+| `structure.mirror` | `NONE` | Mirror mode applied before rotation |
+| `structure.offsetX/Y/Z` | `0` | Structure offset (blocks) |
+| `structure.place` | `true` | Generate the building during world creation |
+| `structure.flatten` | `true` | Flatten the footprint before placement |
+| `structure.maxVoxels` | `4000000` | Maximum readable structure volume |
+| `structure.maxLines` | `12000` | Maximum number of reveal wireframe segments |
+| `structure.showInfo` | `false` | Display structure information on the selection map |
 
-Biome colours changed in the in-game editor are saved to `config/yardsite/site_biome_colors.json`.
+Biome color adjustments are stored in `config/yardsite/site_biome_colors.json`.
 
-## Worth knowing
+## Notes
 
-- Only for single-player and LAN world creation. Dedicated servers do not have this screen.
-- While the camera move plays, this mod takes over the world-creation loading screen. If another mod
-  does the same, the two may get in each other's way; set `site.revealAnim = false` to compare.
-- The map uses the mod's own renderer. No assets from the base game or from other mods are included.
-- Outline lines are a constant width <b>in screen pixels</b>: never hair-thin at a distance, never
-  chunky up close.
+- The reveal animation takes over the vanilla world-creation loading screen. It may conflict with other mods that modify the same screen; disable it with `site.revealAnim`.
+- The ground scan limit for site selection and building placement is y=300 (500 for Epic Terrain). High terrain is handled at its actual height.
+- This mod contains no game assets or third-party mod code.
+- The gold wireframe width is a constant in screen pixels and does not change with distance.
 
 ## Building
 
 ```bash
-./gradlew build                  # jar in build/libs/yardsite-<version>.jar
-./gradlew runClient              # dev client
+./gradlew build       # jar output in build/libs/
+./gradlew runClient   # development client
 ```
 
-Sodium is only needed at compile time for the optional culling hooks. Drop
-`sodium-neoforge-0.8.13+mc1.21.1-mod.jar` into `libs/` before building to include them; without it
-the build skips those classes and the mod still runs.
+Sodium is used only for optional compile-time culling hooks. Place the corresponding Sodium jar in `libs/` to enable them; the build succeeds without it.
 
-## Credits
+## Development notes
 
-Design, decisions and testing: CYun_CYER. Part of the code was written with AI assistants (DeepSeek,
-Qwen) and then reviewed, tested and edited by hand; the mod's behaviour is not generated at runtime.
+Design, trade-offs and in-game testing were performed by the author. Some code was written with AI assistance and was manually reviewed and organized before submission. The mod does not depend on any AI service at runtime.
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Use it, change it, ship it, sell it, as long as the copyright notice
-stays.
+MIT License. See [LICENSE](LICENSE). Use, modification, redistribution and commercial use are permitted with retention of the copyright notice.
 
 ---
 
