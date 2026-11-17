@@ -132,7 +132,7 @@ public final class SchematicStructure {
     }
 
     /** 当前这份结构；没开、没配、读不了都是 {@code null}。 */
-    public static Schematic get() {
+    public static synchronized Schematic get() {
         if (!enabled()) return null;
         long now = System.currentTimeMillis();
         // 一秒内直接给上次的结果（成功或失败都算）：读坏文件时也别每帧重试一遍
@@ -288,7 +288,7 @@ public final class SchematicStructure {
     }
 
     /** 丢掉缓存（改完文件重新读）。 */
-    public static void invalidate() {
+    public static synchronized void invalidate() {
         cached = null;
         cachedKey = "";
         cachedMtime = 0L;

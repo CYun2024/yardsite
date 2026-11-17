@@ -7,6 +7,7 @@ import dev.yard.site.api.SiteLink;
 import dev.yard.site.api.SiteLinks;
 import dev.yard.site.api.SitePlan;
 import dev.yard.site.structure.SchematicSite;
+import dev.yard.site.structure.SurfaceLooks;
 import dev.yard.site.worldgen.SiteRevealState;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -192,6 +193,8 @@ public class SiteRevealScreen extends Screen {
 
     SiteRevealScreen(SiteRevealHandoff.Payload payload) {
         super(SiteText.revealTitle(SiteText.Stage.ENTER));
+        // 沙盘还没预热完（例如没走选区图直接进世界）时在这里补一次后台预读
+        SurfaceLooks.prewarm();
         this.planner = payload.planner;
         this.relief = new SiteReliefField(planner, payload.siteX, payload.siteZ);
         this.field = relief;

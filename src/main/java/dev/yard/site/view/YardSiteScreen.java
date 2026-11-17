@@ -6,6 +6,7 @@ import dev.yard.site.compat.EpicTerrainCompat;
 import dev.yard.site.schematic.Schematic;
 import dev.yard.site.schematic.SchematicTransform;
 import dev.yard.site.structure.SchematicStructure;
+import dev.yard.site.structure.SurfaceLooks;
 import dev.yard.site.worldgen.SiteSelection;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -218,6 +219,8 @@ public class YardSiteScreen extends Screen {
 
     @Override
     protected void init() {
+        // 沙盘阶段就后台读投影文件、算好落成要用的模型面/贴图色：点「确认并创建」时不再卡这一下
+        SurfaceLooks.prewarm();
         // 沙盘占满中间：只留一圈边给四个角的字和按钮
         this.mapSize = Math.min(this.width - 20, this.height - 56);
         this.mapX = (this.width - mapSize) / 2;

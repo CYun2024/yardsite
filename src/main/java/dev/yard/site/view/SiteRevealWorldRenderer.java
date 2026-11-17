@@ -137,7 +137,7 @@ final class SiteRevealWorldRenderer {
     /** 空中机位至少有这么俯：太平就只剩一条地平线，院子读不出立体。 */
     private static final float AERIAL_PITCH_MIN = 30.0F;
     /** 正交→透视的过渡时长。 */
-    static final int INTRO_MS = 4200;
+    static final int INTRO_MS = 3000;
     /** 真实落点晚到时，镜头终点往新落点挪这么久（不重建、不重飞）。 */
     private static final int RETARGET_MS = 700;
     /** 屏幕外的剔除余量（像素）：近处一根柱子投影可以有一百多像素宽。 */
@@ -255,9 +255,9 @@ final class SiteRevealWorldRenderer {
     private float introEase;
     /** 这一帧正交侧的比重（1 = 就是精读那张图）。 */
     private float orthoWeight;
-    /** 开场自动取景：内容的包围盒（世界坐标）和据此算出的镜头距离。 */
+    /** 开场自动取景：内容的包围盒（世界坐标）和据此算出的终点镜头距离。 */
     private float[] fitBox;
-    private double fitDistance = -1.0;
+    private double fitTarget = -1.0;
     /** 投影最多占屏幕宽/高的多少（留一圈边，别顶到边上）。 */
     private static final double FIT_FILL = 0.80;
     /** 这一帧的竖向压缩：开场按精读的比例，收尾展开成真实高度。 */
@@ -402,6 +402,8 @@ final class SiteRevealWorldRenderer {
         // 开场正交画面里「一个模型单位 = orthoBlocksPerUnit 方块」，所以像素/方块就是上面那个比值
         this.startK = Minecraft.getInstance().getWindow().getGuiScaledHeight() * 0.5F / orthoPxPerBlock;
         this.endK = END_DISTANCE * (float) Math.tan(Math.toRadians(aerialFov) * 0.5);
+        // 终点距离先按常数占位；取景盒子一到就滑到"装得下整栋"的距离（见 updateFitTarget）
+        this.fitTarget = endK / Math.tan(Math.toRadians(aerialFov) * 0.5);
         this.sitePitch = solveAerialPitch();
 
         int maxSide = Math.max(field.fine(), coarse.fine());
@@ -538,8 +540,14 @@ final class SiteRevealWorldRenderer {
         this.focus = focusFrom.lerp(focusTo, smooth(retargetElapsed / (float) RETARGET_MS));
         // 动画段用长焦（不超过 AERIAL_FOV），落机时才展开回玩家自己的视野
         fov = Mth.lerp(e, START_FOV, aerialFov);
-        float k = (float) Math.exp(Mth.lerp(e, (float) Math.log(startK), (float) Math.log(endK)));
-        float distance = k / (float) Math.tan(Math.toRadians(fov) * 0.5);
+        // 镜头距离：起点和交接那张正交图逐像素对齐，终点是"装得下整栋"的距离；
+        // 中间按同一个 e 在对数空间插值，加速/减速和视野、俯仰完全同步，不会某一截先冲完再干等。
+        if (collapseAt < 0L) updateFitTarget(delta);
+        float startDistance = startK / (float) Math.tan(Math.toRadians(START_FOV) * 0.5);
+        float endDistance = fitTarget > 0.0 ? (float) fitTarget
+                : endK / (float) Math.tan(Math.toRadians(aerialFov) * 0.5);
+        float distance = (float) Math.exp(Mth.lerp(e, (float) Math.log(startDistance),
+                (float) Math.log(endDistance)));
         // 空中段朝同一方向极缓地绕（不是来回摆），等着区块的那几秒就不像一张静止图。
         // ramp 从开场过半之后才起转，接图那一帧和精读画面逐像素一致；收尾消散那 300 ms 停转，
         // 落机时再由 lookBlend 收回玩家视线。
@@ -561,19 +569,6 @@ final class SiteRevealWorldRenderer {
         float fy = Mth.lerp(e, baseY, (float) focus.y);
         float fz = Mth.lerp(e, startFocusZ, (float) focus.z);
         Vec3 fitFocus = new Vec3(fx, fy, fz);
-        // 自动取景：镜头距离不再是一个拍脑袋的常数，而是"这栋楼投影到屏幕上有多大"反推出来的。
-        // 大塔会自己退远、小屋会自己靠近，两种都正好把整栋（含屋外的花草、屋顶）装进画面。
-        if (fitDistance < 0.0) fitDistance = distance;   // 从当前机位出发往目标滑，别一帧跳过去
-        if (collapseAt < 0L) {
-            double need = fitDistanceFor(fitFocus, look, right, up, Math.tan(Math.toRadians(fov) * 0.5));
-            if (need > 0.0) {
-                // 按时间收敛（时间常数 2 秒），而不是每帧固定比例：
-                // 之前 18%/帧 会在 0.3 秒内把镜头一把推到目标，观感上就是"透视变化变快了"
-                double blend = 1.0 - Math.exp(-Math.min(0.25, delta / 1000.0) / 2.0);
-                fitDistance += (need - fitDistance) * blend;
-            }
-        }
-        if (fitDistance > 0.0) distance = (float) fitDistance;
         eye = fitFocus.subtract(look.scale(distance));
         // 竖向比例跟着粗场现值走（精读那边可能还在慢慢涨），两侧用同一个数才对得上
         float span = Math.max(20.0F, intro.field().reliefSpan());
@@ -581,6 +576,29 @@ final class SiteRevealWorldRenderer {
         waterFloor = WATER_SINK * span;
         heightUnitBlocks = span / SiteTerrainRenderer.RELIEF;
         setDrawCamera(eye, yaw, pitch, fov);
+    }
+
+    /**
+     * 终点取景距离：用<b>落定后</b>的机位（俯仰、视野、落点）反推，不跟当前过渡参数走，
+     * 所以整段过渡只有一条平滑的目标；真实落点/结构尺寸后到时目标自己滑过去，镜头不会跳。
+     */
+    private void updateFitTarget(long delta) {
+        // 终点机位要算上开场那点环绕（落定后镜头还在原处），否则大结构可能被绕出画面
+        double yr = Math.toRadians(siteYaw + orbitDeg);
+        double pr = Math.toRadians(sitePitch);
+        Vec3 endLook = new Vec3(-Math.sin(yr) * Math.cos(pr), -Math.sin(pr), Math.cos(yr) * Math.cos(pr));
+        Vec3 endRight = new Vec3(-Math.cos(yr), 0.0, -Math.sin(yr));
+        Vec3 endUp = endRight.cross(endLook).normalize();
+        double need = fitDistanceFor(focus, endLook, endRight, endUp,
+                Math.tan(Math.toRadians(aerialFov) * 0.5));
+        if (need <= 0.0) return;
+        if (fitTarget <= 0.0) {
+            fitTarget = need;
+        } else {
+            // 目标按 0.35 秒的时间常数滑：晚到的落点只是让终点慢慢挪，不会把已经在飞的镜头拽一下
+            double blend = 1.0 - Math.exp(-Math.min(0.25, delta / 1000.0) / 0.35);
+            fitTarget += (need - fitTarget) * blend;
+        }
     }
 
     /**
@@ -624,7 +642,6 @@ final class SiteRevealWorldRenderer {
             z1 = box[5];
         }
         fitBox = new float[]{x0, y0, z0, x1, y1, z1};
-        fitDistance = -1.0;
         YardSiteLog.debug("开场自动取景：内容 " + Math.round(x1 - x0) + "×" + Math.round(y1 - y0)
                 + "×" + Math.round(z1 - z0) + " 格，按投影比例定镜头距离");
     }
@@ -1422,10 +1439,6 @@ final class SiteRevealWorldRenderer {
     // ── 面：方案 A（静止的模型）/ 方案 D（从地基往上长）────────────────────
 
     /** 面表的方向（和 {@code SurfaceMesh.normal} 的下标对应）。 */
-    private static final double[][] SURFACE_NORMALS = {
-            {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}
-    };
-
     /** 排序用的下标/深度缓冲（按需长，别每帧 new）。 */
     private int[] surfaceOrder = new int[0];
     private float[] surfaceDepth = new float[0];
@@ -1468,7 +1481,10 @@ final class SiteRevealWorldRenderer {
         ensureSurfaceBuffers(mesh.count);
         int n = 0;
         for (int i = 0; i < limit; i++) {
-            double[] normal = SURFACE_NORMALS[mesh.normal[i]];
+            int ni = i * 3;
+            float nx = mesh.normal[ni];
+            float ny = mesh.normal[ni + 1];
+            float nz = mesh.normal[ni + 2];
             int at = i * 12;
             float x0 = mesh.pos[at];
             float y0 = mesh.pos[at + 1];
@@ -1479,9 +1495,9 @@ final class SiteRevealWorldRenderer {
             float cx = (x0 + x2) * 0.5F;
             float cy = (y0 + y2) * 0.5F;
             float cz = (z0 + z2) * 0.5F;
-            // 背面剔除：法线背着相机的那一面永远看不见
-            if (normal[0] * (drawEye.x - cx) + normal[1] * (drawEye.y - cy)
-                    + normal[2] * (drawEye.z - cz) <= 0.0) {
+            // 背面剔除：法线背着相机的那一面永远看不见（十字花草这类双面面片不剔）
+            if (mesh.cull[i] != 0 && nx * (drawEye.x - cx) + ny * (drawEye.y - cy)
+                    + nz * (drawEye.z - cz) <= 0.0) {
                 continue;
             }
             if (!project(mesh.pos[at], mesh.pos[at + 1], mesh.pos[at + 2], sa)
@@ -1498,8 +1514,9 @@ final class SiteRevealWorldRenderer {
                     || by1 < -CULL_MARGIN || by0 > height + CULL_MARGIN) {
                 continue;
             }
-            // 屏幕上不到一个像素的面不提交：远景一栋楼几万个面，这一步能省掉一多半
-            if ((bx1 - bx0) * (by1 - by0) < 1.4F) continue;
+            // 屏幕上不到一个像素的面不提交：远景一栋楼几万个面，这一步能省掉一多半。
+            // 阈值放到 0.6：栏杆/窗格这些本来就细，1.4 会把它们整片抹掉
+            if ((bx1 - bx0) * (by1 - by0) < 0.6F) continue;
             // 深度键按"面下标"存：下面的快排是拿 order[k] 去取 key 的
             surfaceDepth[i] = (sa[2] + sb[2] + sc[2] + sd[2]) * 0.25F;
             int sc0 = i * 8;

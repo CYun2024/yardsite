@@ -152,28 +152,44 @@ public final class SchematicSite implements SiteLink {
     /** 面表缓存：同一次落座只建一次（一栋房子两万个面，建一次几十毫秒，不能每帧建）。 */
     private static SurfaceMesh surfaceCached;
     private static SitePlan surfaceCachedFor;
+    private static SurfaceLook[] surfaceCachedLooks;
+    private static boolean surfaceBuilt;
 
     /**
-     * 落成动画要画的"面"（见 {@link SurfaceMesh}）。
+     * 落成动画要画的"面"（见 {@link SurfaceMesh}），外观用形状盒兜底。
      *
      * <p>返回 {@code null} = 没开结构模式 / 读不到文件 / 结构是空的，渲染阶段就不画面，走原来的线框。
      */
     public static SurfaceMesh surfaceFor(SitePlan plan) {
+        return surfaceFor(plan, null);
+    }
+
+    /**
+     * 落成动画要画的"面"。
+     *
+     * @param looks 客户端算好的方块外观（模型面 + 贴图色，见 {@link SurfaceLooks}）；
+     *              {@code null} = 用形状盒 + 地图色兜底
+     */
+    public static SurfaceMesh surfaceFor(SitePlan plan, SurfaceLook[] looks) {
         Schematic schematic = SchematicStructure.get();
         if (schematic == null || plan == null || plan.plot() == null) return null;
-        if (surfaceCachedFor == plan && surfaceCached != null) return surfaceCached;
+        if (surfaceBuilt && surfaceCachedFor == plan && surfaceCachedLooks == looks) return surfaceCached;
         SurfaceMesh mesh;
         try {
             mesh = SurfaceMesh.build(schematic, SchematicStructure.transform(),
-                    plan.originX(), plan.originY(), plan.originZ());
+                    plan.originX(), plan.originY(), plan.originZ(), looks);
         } catch (RuntimeException broken) {
             // 建面表失败就当作"没有面"：退回线框，别让落成动画整段挂掉
             YardSiteLog.debug("落成面表建不起来，退回线框：" + broken);
             surfaceCachedFor = plan;
+            surfaceCachedLooks = looks;
+            surfaceBuilt = true;
             surfaceCached = null;
             return null;
         }
         surfaceCachedFor = plan;
+        surfaceCachedLooks = looks;
+        surfaceBuilt = true;
         surfaceCached = mesh.count == 0 ? null : mesh;
         return surfaceCached;
     }

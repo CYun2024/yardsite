@@ -3,8 +3,12 @@ package dev.yard.site.view;
 import dev.yard.site.api.BlueprintBox;
 import dev.yard.site.api.BlueprintLine;
 import dev.yard.site.api.SitePlan;
+import dev.yard.site.schematic.Schematic;
 import dev.yard.site.schematic.SchematicHiddenLines;
 import dev.yard.site.structure.SchematicSite;
+import dev.yard.site.structure.SchematicStructure;
+import dev.yard.site.structure.SurfaceLook;
+import dev.yard.site.structure.SurfaceLooks;
 import dev.yard.site.structure.SurfaceMesh;
 
 import java.util.List;
@@ -107,8 +111,20 @@ final class SiteBlueprint {
             top = Math.max(top, Math.max(l.y1(), l.y2()) - y0);
         }
         // 画面的时候不用再算一遍折角棱的消隐（那是给线框用的，一栋房子要几十毫秒）
-        SurfaceMesh surface = dev.yard.site.YardSiteConfig.REVEAL_SURFACE.get()
-                ? SchematicSite.surfaceFor(plan) : null;
+        SurfaceMesh surface = null;
+        if (dev.yard.site.YardSiteConfig.REVEAL_SURFACE.get()) {
+            Schematic schematic = SchematicStructure.get();
+            SurfaceLook[] looks = null;
+            if (schematic != null) {
+                try {
+                    // 沙盘阶段后台算好的模型面/贴图色；没算好就在这里同步算一遍
+                    looks = SurfaceLooks.looksFor(schematic);
+                } catch (RuntimeException broken) {
+                    looks = null;
+                }
+            }
+            surface = SchematicSite.surfaceFor(plan, looks);
+        }
         if (surface != null) {
             // 高度以面表为准：线一条都没有（或短于屋脊）时也能按时长长上去
             top = Math.max(top, surface.highY - y0);
