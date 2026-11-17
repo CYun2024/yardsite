@@ -140,6 +140,7 @@ A mod that adds biomes after world generation has run may still show the base bi
 | `site.revealAnim` | `true` | the camera move; `false` keeps the vanilla loading screen |
 | `site.revealSurface` | `true` | draw the reveal as surfaces instead of lines (structure mode: a small model with all decorations) |
 | `site.revealSurfaceScan` | `true` | gold lines grow up first (C), hold 2 s, then surfaces fill the wireframe from the bottom up (D); `false` shows the whole model at once |
+| `site.revealFadeDelayMs` | `1000` | how long the building effect stays after the **center chunk** takes over before fading out (ms); no longer waits for every chunk |
 | `site.revealLineWidth` | `1.5` | outline line width in GUI pixels (distance independent); only used when `revealSurface=false` |
 | `site.revealLineGlow` | `true` | soft halo around the lines; turn off on weak GPUs |
 | `structure.enabled` | `false` | use a schematic as the site target (see above) |

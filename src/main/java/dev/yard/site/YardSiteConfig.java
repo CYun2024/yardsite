@@ -91,6 +91,12 @@ public final class YardSiteConfig {
                     + "只在 site.revealSurface 打开时有用")
             .define("site.revealSurfaceScan", true);
 
+    public static final ModConfigSpec.IntValue REVEAL_FADE_DELAY_MS = BUILDER
+            .comment("落成动画的建筑效果（面/金线）在「最中心那块真实区块接手」之后等多久开始原地淡出"
+                    + "（毫秒，默认 1000）。不再等所有区块都交接完；设为 0 = 中心区块一接手就开始淡。"
+                    + "淡出本身约 0.7 秒")
+            .defineInRange("site.revealFadeDelayMs", 1000, 0, 20000);
+
     // ── 投影文件（用一份 .litematic / .nbt / .schem 当选址目标）────────────────
     //
     // 这一组默认全关：装了庭院系列时它还是「给旅社选区」，只有打开 structure.enabled，

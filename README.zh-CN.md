@@ -116,6 +116,7 @@
 | `site.revealAnim` | `true` | 落成镜头；关掉就用原版加载界面 |
 | `site.revealSurface` | `true` | 落成动画画「面」而不是「线」（结构模式下就是一栋小模型，装饰都在） |
 | `site.revealSurfaceScan` | `true` | 金线先自下而上长出来（C），停 2 秒，再让面自下而上把线框填实（D）；关掉 = 整栋一次出现 |
+| `site.revealFadeDelayMs` | `1000` | 建筑效果在**最中心那块真实区块**接手之后留多久再原地淡出（毫秒）；不再等所有区块交接完 |
 | `site.revealLineWidth` | `1.5` | 落成线框的线宽（界面像素，和远近无关）；`revealSurface=false` 时才有用 |
 | `site.revealLineGlow` | `true` | 线框外面那层很淡的晕；性能紧张可以关 |
 | `structure.enabled` | `false` | 用一份投影文件当选址目标（见上一节） |

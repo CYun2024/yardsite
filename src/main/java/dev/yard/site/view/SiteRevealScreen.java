@@ -810,9 +810,15 @@ public class SiteRevealScreen extends Screen {
             boolean sandboxGone = descendAt != 0L && world.allReady();
             // 交接真实区块（落机开始）之后，建筑效果还要在原地和真方块叠 1 秒再化掉：
             // 沙盘柱子已经散干净了也得继续提交，不能跟着 sandboxGone 一起停
-            // 交接时刻 = 真区块开始上屏（沙盘开始散）那一刻，不是落机开始：
-            // 落机本身要等所有区块就位，从那儿起算会让建筑效果"区块都交接完了才慢慢消失"
-            long handoverMs = collapseAt == 0L ? -1L : frameNow - collapseAt;
+            // 建筑效果只跟「最中心那块真实区块」交接：它一接手就开始计时，
+            // 等 site.revealFadeDelayMs 后原地淡掉，不再等外围区块全部交接完。
+            // 但建筑还没长完（C/D 没结束）时先不淡，别把动画切掉；交接早于 D 结束时以 D 结束为起点。
+            long handoverMs = world.centerHandoverAgeMs();
+            if (blueprint != null && blueprintAt != 0L) {
+                long sinceBuilt = frameNow - (blueprintAt + blueprint.durationMs);
+                handoverMs = sinceBuilt < 0L ? -1L
+                        : handoverMs < 0L ? -1L : Math.min(handoverMs, sinceBuilt);
+            }
             boolean effectAlive = SiteRevealWorldRenderer.buildAlpha(handoverMs) > 0.002F
                     && blueprint != null && blueprintAt != 0L;
             if (effectAlive || (!sandboxGone && (descendAt == 0L || descend < 1.0F) && alpha > 0.001F)) {

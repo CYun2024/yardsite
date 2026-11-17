@@ -534,18 +534,19 @@ final class SiteRevealWorldRenderer {
         lastTickAt = now;
         introElapsed = Math.min((float) INTRO_MS, introElapsed + delta);
         retargetElapsed = Math.min((float) RETARGET_MS, retargetElapsed + delta);
-        float e = smooth(introElapsed / INTRO_MS);
+        float t = introElapsed / (float) INTRO_MS;
+        float e = smooth(t);
         this.introEase = e;
         this.orthoWeight = 1.0F - e;
         this.focus = focusFrom.lerp(focusTo, smooth(retargetElapsed / (float) RETARGET_MS));
-        // 动画段用长焦（不超过 AERIAL_FOV），落机时才展开回玩家自己的视野
-        fov = Mth.lerp(e, START_FOV, aerialFov);
-        // 镜头距离：起点和交接那张正交图逐像素对齐，终点是"装得下整栋"的距离；
-        // 中间按同一个 e 在对数空间插值，加速/减速和视野、俯仰完全同步，不会某一截先冲完再干等。
+        // 整段用同一个视野（落定机位那个），不靠镜头变焦：画面变大完全来自摄像机真的飞近，
+        // 起点距离按「半屏高度 = 沙盘那张图的方块数」反推，和正交画面同尺度。
+        fov = aerialFov;
         if (collapseAt < 0L) updateFitTarget(delta);
-        float startDistance = startK / (float) Math.tan(Math.toRadians(START_FOV) * 0.5);
+        float startDistance = startK / (float) Math.tan(Math.toRadians(aerialFov) * 0.5);
         float endDistance = fitTarget > 0.0 ? (float) fitTarget
                 : endK / (float) Math.tan(Math.toRadians(aerialFov) * 0.5);
+        // 距离在对数空间插值：每秒缩小的比例一样，飞行速度看着均匀，不会后段突然加速
         float distance = (float) Math.exp(Mth.lerp(e, (float) Math.log(startDistance),
                 (float) Math.log(endDistance)));
         // 空中段朝同一方向极缓地绕（不是来回摆），等着区块的那几秒就不像一张静止图。
@@ -558,6 +559,17 @@ final class SiteRevealWorldRenderer {
         }
         yaw = siteYaw + orbitDeg;
         pitch = Mth.lerp(e, startPitch, sitePitch);
+        // 中途沿一条「抬起再落回」的弧线飞（两头为 0）：直着冲过去的时候，半路会正好贴着山坡
+        // 或沙盘柱子；抬起来时仍然看向同一个焦点，只是俯角临时加大，建筑不会甩出画面。
+        double lift = Math.sin(Math.PI * (double) e)
+                * Mth.clamp(0.10 * (startDistance - endDistance), 8.0F, 96.0F);
+        if (lift > 0.001) {
+            double pr0 = Math.toRadians(pitch);
+            double horizontal = distance * Math.cos(pr0);
+            double vertical = distance * Math.sin(pr0) + lift;
+            distance = (float) Math.hypot(horizontal, vertical);
+            pitch = (float) Math.toDegrees(Math.atan2(vertical, horizontal));
+        }
         double yr = Math.toRadians(yaw);
         double pr = Math.toRadians(pitch);
         look = new Vec3(-Math.sin(yr) * Math.cos(pr), -Math.sin(pr), Math.cos(yr) * Math.cos(pr));
@@ -885,6 +897,18 @@ final class SiteRevealWorldRenderer {
     boolean zoneRevealed() {
         return revealClockStarted && collapseAt < 0L
                 && waiting == 0 && revealClockMs >= maxFadeStart + REVEAL_TAIL_MS;
+    }
+
+    /**
+     * 最中心那块真实区块「接手」之后过了多久（沙盘那一列开始让位 = 真地形开始露出来）。
+     *
+     * @return 毫秒；{@code < 0} = 还没接手（或中心不在细场里）
+     */
+    long centerHandoverAgeMs() {
+        int index = chunkIndex(field.centerChunkX(), field.centerChunkZ());
+        if (index < 0) return -1L;
+        long started = fadeAt[index];
+        return started < 0L ? -1L : revealClockMs - started;
     }
 
     /** 收尾消散已经开始。 */
@@ -1273,14 +1297,25 @@ final class SiteRevealWorldRenderer {
      * 建筑效果（地基金面 + 蓝图/面 + 金线 + 扫描框）的透明度。
      *
      * <p>和沙盘柱子不是一套：柱子跟着落机进度淡，建筑效果要<b>留在原地</b>，
-     * 等真区块接手满 {@value #HOLD_AFTER_HANDOVER_MS} ms 之后再用 {@value #FADE_AFTER_HANDOVER_MS} ms 原地淡掉。
-     * 时间从 {@code collapseAt}（真区块开始上屏、沙盘开始散）起算 —— 以前从落机开始算，
-     * 而落机本身排在所有区块到位之后，于是观感是"区块都交接完了建模才慢慢消失"。
+     * 等<b>最中心那块真实区块</b>接手满 {@code site.revealFadeDelayMs} 毫秒之后，
+     * 再用 {@value #FADE_AFTER_HANDOVER_MS} ms 原地淡掉——不再等所有区块都交接完。
+     *
+     * @param handoverMs 中心区块接过手之后过了多久（毫秒）；{@code < 0} = 还没接手
      */
     static float buildAlpha(long handoverMs) {
         if (handoverMs < 0L) return 1.0F;
-        return 1.0F - Mth.clamp((handoverMs - HOLD_AFTER_HANDOVER_MS)
+        int hold = fadeDelayMs();
+        if (handoverMs <= hold) return 1.0F;
+        return 1.0F - Mth.clamp((handoverMs - hold)
                 / (float) FADE_AFTER_HANDOVER_MS, 0.0F, 1.0F);
+    }
+
+    private static int fadeDelayMs() {
+        try {
+            return YardSiteConfig.REVEAL_FADE_DELAY_MS.get();
+        } catch (IllegalStateException notLoaded) {
+            return 1000;
+        }
     }
 
     private void drawBlueprint(VertexConsumer c, SiteBlueprint blueprint, long elapsedMs, float alpha) {
@@ -1452,9 +1487,7 @@ final class SiteRevealWorldRenderer {
     /** 面表统计只打一次日志。 */
     private boolean surfaceReported;
     /** 蓝图 → 建成的渐变时长（毫秒）：长完之后这么长时间里颜色归位、金线淡掉。 */
-    /** 真实区块接手之后，建筑效果先和真方块叠这么久，再开始原地淡出。 */
-    private static final int HOLD_AFTER_HANDOVER_MS = 320;
-    /** 原地淡出的时长。 */
+    /** 原地淡出的时长（毫秒）。 */
     private static final int FADE_AFTER_HANDOVER_MS = 700;
 
     /**

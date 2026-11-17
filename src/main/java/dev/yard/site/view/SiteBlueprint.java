@@ -137,8 +137,8 @@ final class SiteBlueprint {
         // 矮房子（12 格）约 3 秒，塔楼（50 格）约 9.5 秒
         int linesMs = timed ? (int) Math.max(3_000, Math.min(11_000, top * 190.0F)) : 0;
         int lineDelay = timed ? 260 : 0;
-        // D 段：面自下而上长出来，一格约 70ms，夹在 1.2~4 秒
-        int settleMs = timed ? (int) Math.max(1_200, Math.min(4_000, top * 70.0F)) : 0;
+        // D 段：面自下而上长出来，一格约 105ms（作者要求再放慢），夹在 1.8~6 秒
+        int settleMs = timed ? (int) Math.max(1_800, Math.min(6_000, top * 105.0F)) : 0;
         // 时间轴：C 金线生长 → 停 HOLD_MS（完整线框站在原地）→ D 面自下而上长出来。
         // 落机（交接真实区块）会等这条时间轴走完，顺序才是"先长、再停、再落定、最后交给真方块"。
         int duration = Math.max(boxMs, timed ? lineDelay + linesMs + HOLD_MS + settleMs : 0);
