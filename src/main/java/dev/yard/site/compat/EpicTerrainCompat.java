@@ -16,8 +16,8 @@ import org.jetbrains.annotations.Nullable;
  *
  * <p>认到之后改两件事：
  * <ul>
- *   <li><b>山头不再截断在 160</b>：选址图和落点规划的山头上限抬到 {@link #TALL_PEAK_TOP_Y}
- *       （{@link SurfaceProbe} 会再按维度和噪声范围夹一次）。不抬的话 160 以上整座山被拍平，
+ *   <li><b>山头不再截断在 300</b>：选址图和落点规划的山头上限抬到 {@link #TALL_PEAK_TOP_Y}
+ *       （{@link SurfaceProbe} 会再按维度和噪声范围夹一次）。不抬的话 300 以上整座山被拍平，
  *       建筑原点也会定到半山腰。</li>
  *   <li><b>大沙盘按配置加宽</b>：见 {@link #selectRadius}，±2000 在这种地形上常常整张图都在
  *       同一座山上。</li>
@@ -42,7 +42,7 @@ public final class EpicTerrainCompat {
 
     private EpicTerrainCompat() {}
 
-    /** 选址图和落点规划用的山头上限：史诗地形给 {@link #TALL_PEAK_TOP_Y}，其他世界照旧 160。 */
+    /** 选址图和落点规划用的山头上限：史诗地形给 {@link #TALL_PEAK_TOP_Y}，其他世界用 {@link SurfaceProbe#PEAK_TOP_Y}（300）。 */
     public static int peakCeiling(RegistryAccess registries) {
         return isEpicTerrain(registries) ? TALL_PEAK_TOP_Y : SurfaceProbe.PEAK_TOP_Y;
     }

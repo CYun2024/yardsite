@@ -32,8 +32,13 @@ import net.minecraft.world.level.levelgen.RandomState;
  */
 public final class SurfaceProbe {
 
-    /** 原版量级的山头上限：比这还高的山头按截断算，也是没装高山类 mod 时的取值。 */
-    public static final int PEAK_TOP_Y = 160;
+    /**
+     * 普通世界的山头上限（绝对 y）：300 覆盖原版与常见地形 mod 的高山。
+     *
+     * <p>以前是 160，高于 160 的山头会被拍平：选址图和落点规划都把山顶当成 160，
+     * 建筑就定在半山腰、大半埋进山里。史诗地形另有更高的上限（见 {@code EpicTerrainCompat}）。
+     */
+    public static final int PEAK_TOP_Y = 300;
     /** 完全没有起点提示时用的那把快扫的竖直跨度（格）：越小越便宜，超出部分靠抬档。 */
     public static final int SHALLOW_HEIGHT = 192;
     /** {@link #surfaceAt(int, int, int)} 的提示取值：这一列没有邻居可参考。 */

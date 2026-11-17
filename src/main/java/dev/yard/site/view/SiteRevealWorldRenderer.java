@@ -1407,9 +1407,11 @@ final class SiteRevealWorldRenderer {
                 0.0F, 1.0F);
         if (t <= 0.0F) return;
         float span = Math.max(1.0F, blueprint.heightBlocks);
-        float sweep = blueprint.baseY + span * smooth(t);
         // 一条线从"被扫到"到"完全亮起"要走这么高：给一点过渡，别像开关一样跳
         float feather = Math.max(0.5F, span * 0.035F);
+        // 扫描线要多扫过顶面一个过渡宽度：最顶上那个面的棱线正好在结构最高处，
+        // 只扫到 span 的话它永远差最后一格，C 段建完屋顶轮廓会缺一条
+        float sweep = blueprint.baseY + (span + feather) * smooth(t);
         // 扫过平面附近的这一段用接近白的亮色，扫过去就回到金色
         float leadSpan = Math.max(1.5F, span * 0.16F);
         // 按机位消隐：这一帧从这个角度看过去，哪些段露着（被挡住的整段已经剔掉、挡一半的只剩露出的那半）
