@@ -1,7 +1,6 @@
 # 更新记录 / Changelog
 
-> 0.2.0 是内部验收版，**未公开发布**；0.2.1 是第一个公开版本。
-> 更早的 0.1.x 见 GitHub Releases。
+> 按版本倒序记录。更早的版本见 GitHub Releases。
 
 ## 0.2.1 · 2026-11-18 — 相对 0.2.0
 
@@ -88,7 +87,7 @@ and all config keys are untouched. Both 1.20.1 and 1.21.1 were re-tested on clea
 
 ---
 
-## 0.2.0 · 2026-11-17（内部验收版，未公开发布）
+## 0.2.0 · 2026-11-17
 
 **新增**
 
