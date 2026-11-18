@@ -38,10 +38,12 @@ import java.util.function.BooleanSupplier;
 /**
  * 建世界时的「群系 + 地形」大沙盘采样：完全在客户端算，不加载任何区块。
  *
- * <p>群系问 {@link TerraBlenderCompat#previewSource} 给的那个源：默认就是这个世界生成器自己的
- * {@code BiomeSource}（{@code getNoiseBiome}，和区块生成时同一套调用），所以改群系的 mod / 数据包
- * 自动生效；装了 TerraBlender 时它是同一份参数表按同一个种子做出来的<b>预览副本</b>，因为原版那份
- * 要等服务端启动才挂上 TerraBlender 的 mod 区域表，而这张图比服务端早。高度用
+ * <p>生成器问 {@link SiteDimensions}：数据包给了 {@code minecraft:overworld} 就优先用数据包那份
+ * （和存档实际 bake 出来的一致），否则用世界预设。所以 Terralith 这种「纯数据包提供主世界」的
+ * mod，群系和地形都能画对。群系再问 {@link TerraBlenderCompat#previewSource} 给的那个源：默认就是
+ * 这个生成器自己的 {@code BiomeSource}（{@code getNoiseBiome}，和区块生成时同一套调用）；装了
+ * TerraBlender 时它是同一份参数表按同一个种子做出来的<b>预览副本</b>，因为原版那份要等服务端启动
+ * 才挂上 TerraBlender 的 mod 区域表，而这张图比服务端早。高度用
  * {@link ChunkGenerator#getBaseHeight}，只做大致的山体阴影，看不到树、村庄和结构。
  *
  * <h2>从中心向外扩散</h2>
@@ -368,9 +370,8 @@ public final class SiteMapSampler implements AutoCloseable {
     private final ExecutorService pool;
 
     public SiteMapSampler(WorldCreationContext context, int radius) {
-        this.generator = context.selectedDimensions().overworld();
-        LevelStem stem = context.selectedDimensions().get(LevelStem.OVERWORLD)
-                .orElseThrow(() -> new IllegalStateException("缺少主世界生成设置"));
+        LevelStem stem = SiteDimensions.overworld(context);
+        this.generator = stem.generator();
         DimensionType dimension = stem.type().value();
         int minY = dimension.minY();
         int maxY = minY + dimension.height();
@@ -408,8 +409,8 @@ public final class SiteMapSampler implements AutoCloseable {
                 + (columns * HEIGHT_STRIDE) + "（从中心向外，一根柱子约盖 "
                 + Math.round(step * HEIGHT_STRIDE) + " 格方块，共 " + this.view.heightPoints
                 + "+" + this.view.fine * this.view.fine + " 个采样点）"
-                + "，竖直扫描默认上沿 " + probe.startTop() + "，最多抬到 " + probe.capTop()
-                + "（起点按邻居趋势挪，顶到上沿就抬档重扫，超过上限的山头按截断算）");
+                + "，高度采样按邻居趋势开 ±小窗口（没提示时从 " + probe.startTop() + " 起，最多抬到 "
+                + probe.capTop() + "，超过上限的山头按截断算）");
     }
 
     /** 采样还没跑完也能拿到的活数据；界面拿它边算边画。 */
@@ -450,7 +451,9 @@ public final class SiteMapSampler implements AutoCloseable {
                 : "";
         YardSiteLog.debug("选址图中心向外采样：" + ms + " ms（"
                 + throughput(view.heightPoints, ms) + " 点/秒，跳过水域 " + skipped.get() + " 点）"
-                + cpuInfo + "；地块 " + readyBlocks() + "/" + view.heightPoints
+                + cpuInfo + "；高度查询 " + probe.heightCalls() + " 次（平均 "
+                + String.format(java.util.Locale.ROOT, "%.1f", probe.windowCells() / (double) view.heightPoints)
+                + " 格窗口/点）；地块 " + readyBlocks() + "/" + view.heightPoints
                 + "，群系 " + view.palette.size() + " 种");
         if (cancelled.getAsBoolean()) throw new IllegalStateException("已取消");
         view.full = true;

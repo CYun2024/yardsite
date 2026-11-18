@@ -2,6 +2,24 @@
 
 > 按版本倒序记录。更早的版本见 GitHub Releases。
 
+## 0.2.3 · 2026-11-18 — 相对 0.2.2
+
+**修复**
+
+- 1.20.1：装 Terralith 这类数据包地形 mod 时，选区图和沙盘显示它的群系与地形（之前只画原版）。
+- 沙盘出图更快。
+
+配置文件与 0.2.2 兼容，可直接沿用。
+
+**Fixed**
+
+- 1.20.1: the site map now shows biomes and terrain from data-pack worldgen mods such as Terralith (vanilla only before).
+- Faster site map.
+
+Configuration is compatible with 0.2.2 and can be reused unchanged.
+
+---
+
 ## 0.2.2 · 2026-11-18 — 相对 0.2.1
 
 **修复**

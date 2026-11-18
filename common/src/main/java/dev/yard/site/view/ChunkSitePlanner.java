@@ -265,9 +265,8 @@ final class ChunkSitePlanner implements AutoCloseable {
     private volatile boolean cancelled;
 
     ChunkSitePlanner(WorldCreationContext context, int blockX, int blockZ) {
-        this.generator = context.selectedDimensions().overworld();
-        LevelStem stem = context.selectedDimensions().get(LevelStem.OVERWORLD)
-                .orElseThrow(() -> new IllegalStateException("缺少主世界生成设置"));
+        LevelStem stem = SiteDimensions.overworld(context);
+        this.generator = stem.generator();
         DimensionType dimension = stem.type().value();
         this.minY = dimension.minY();
         this.maxY = minY + dimension.height();
