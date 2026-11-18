@@ -3,11 +3,11 @@ package dev.yard.site.mixin;
 import dev.yard.site.YardSiteConfig;
 import dev.yard.site.api.SiteLink;
 import dev.yard.site.api.SiteLinks;
+import dev.yard.site.platform.Platform;
 import dev.yard.site.view.SiteRevealHandoff;
 import dev.yard.site.view.YardSiteScreen;
 import dev.yard.site.worldgen.SiteSelection;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.GenericMessageScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.worldselection.CreateWorldScreen;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationContext;
@@ -54,7 +54,7 @@ public abstract class CreateWorldScreenMixin {
      */
     @Inject(method = "queueLoadScreen", at = @At("HEAD"), cancellable = true)
     private static void yardsite$revealWhilePreparing(Minecraft minecraft, Component title, CallbackInfo ci) {
-        Screen vanilla = new GenericMessageScreen(title);
+        Screen vanilla = Platform.client().messageScreen(title);
         Screen next = SiteRevealHandoff.orReveal(vanilla);
         if (next != vanilla) {
             minecraft.forceSetScreen(next);

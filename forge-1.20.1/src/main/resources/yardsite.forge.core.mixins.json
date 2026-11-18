@@ -1,0 +1,16 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.yard.site.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "yardsite.refmap.json",
+  "client": [
+    "CreateWorldScreenMixin",
+    "CreateWorldScreenAccessor",
+    "MinecraftSiteLoadMixin",
+    "GameRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

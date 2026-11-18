@@ -1,0 +1,15 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven { url = 'https://maven.minecraftforge.net/' }
+        maven { url = 'https://repo.spongepowered.org/repository/maven-public/' }
+        maven { url = 'https://bmclapi2.bangbang93.com/maven' }
+    }
+}
+
+// 编译/运行要 JDK 17：本机没装 17 时让 Gradle 自己下载（与核心工程的 settings.gradle.kts 一致）
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
+}
+
+rootProject.name = 'yardsite-forge-1.20.1'

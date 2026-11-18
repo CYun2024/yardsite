@@ -121,6 +121,11 @@ public class YardSiteScreen extends Screen {
     /** 面板当前页：参数（宽度/工具）或调色。 */
     private int panelTab = TAB_VIEW;
     /** 大沙盘柱子宽度：两根分开存，切层时顺过去（语义同旧版，横向撑开、高度不撑）。 */
+    /** 上一帧的鼠标位置：1.20.1 的 renderBackground 没有鼠标参数，生成源码里用它。 */
+    private int lastMouseX;
+    private int lastMouseY;
+    /** 这一帧的背景层（压暗 + 沙盘）画过没有：1.20.2+ 由框架调 renderBackground，1.20.1 只能自己补。 */
+    private boolean backdropDrawn;
     private float sandboxWidth = 1.0F;
     /** 区块精读柱子宽度。 */
     private float detailWidth = 1.0F;
@@ -359,10 +364,19 @@ public class YardSiteScreen extends Screen {
         g.fill(0, 0, this.width, this.height, 0x990A0C12);
         // 沙盘画在背景这一层：按钮和字都在它上面，不会被挡
         drawMap(g, mouseX, mouseY);
+        backdropDrawn = true;
     }
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+        this.lastMouseX = mouseX;
+        this.lastMouseY = mouseY;
+        // 1.20.2 起框架会在 render 之前自己调 renderBackground；1.20.1 的 Screen 里没有这一下，
+        // 不补的话沙盘整层都不会画（画面上只剩上一张界面的残影），落成动画也不会推进。
+        if (!backdropDrawn) {
+            renderBackground(g, mouseX, mouseY, partialTick);
+        }
+        backdropDrawn = false;
         super.render(g, mouseX, mouseY, partialTick);
         // 面板画在沙盘之后：它盖住右边一小块，但那一小块以外的转视角、选点、吸管都照常
         drawEditPanel(g, mouseX, mouseY);
@@ -906,7 +920,8 @@ public class YardSiteScreen extends Screen {
 
     /** 左下角：选点结果，没选点时说要怎么选；字放不下就折行，不截掉。 */
     private void drawBottomLeft(GuiGraphics g) {
-        int maxWidth = this.width - 420;
+        // 小窗口下别把可用宽度算成 7px（右下角那排按钮至少占 420 的逻辑宽，但字得先能看）
+        int maxWidth = Math.max(160, this.width - 420);
         List<String> lines = new ArrayList<>();
         int hintFrom = Integer.MAX_VALUE;
         if (sampleError != null) {
@@ -931,6 +946,9 @@ public class YardSiteScreen extends Screen {
 
     /** 按字体宽度把一行字折成多行：能在全角空格/逗号处断就从那里断，否则按宽度硬断。 */
     private void wrapLines(String text, int maxWidth, List<String> out) {
+        // 一行至少放一个字符：窗口窄到连一个汉字都放不下时（例如 854×480、GUI 缩放 2 → 逻辑宽 427），
+        // 不设这个下限 start 永远不前进，会每帧往 out 里塞空串直到 java.lang.OutOfMemoryError
+        int limit = Math.max(this.font.width("字"), maxWidth);
         int start = 0;
         while (start < text.length()) {
             int end = start;
@@ -938,7 +956,7 @@ public class YardSiteScreen extends Screen {
             int lastBreak = -1;
             while (end < text.length()) {
                 int w = this.font.width(String.valueOf(text.charAt(end)));
-                if (width + w > maxWidth) break;
+                if (end > start && width + w > limit) break;
                 width += w;
                 char c = text.charAt(end);
                 if (c == '　' || c == '，' || c == ' ') lastBreak = end + 1;

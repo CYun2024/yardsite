@@ -1,5 +1,6 @@
 package dev.yard.site.view;
 
+import dev.yard.site.platform.Vertices;
 import dev.yard.site.YardSiteConfig;
 import dev.yard.site.YardSiteLog;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -406,7 +407,7 @@ final class SiteTerrainRenderer {
         lastScale = scale;
         float originX = areaX + areaSize / 2.0F + panX;
         float originY = areaY + areaSize / 2.0F + panY;
-        VertexConsumer consumer = g.bufferSource().getBuffer(RenderType.gui());
+        VertexConsumer consumer = Vertices.wrap(g.bufferSource().getBuffer(RenderType.gui()));
 
         collect(field, now, columns, per, heightScale);
         sortByDepth(columns);
@@ -495,7 +496,7 @@ final class SiteTerrainRenderer {
         g.flush();
 
         // 第二层：旅社蓝图和标记永远压在最上面
-        VertexConsumer overlay = g.bufferSource().getBuffer(RenderType.gui());
+        VertexConsumer overlay = Vertices.wrap(g.bufferSource().getBuffer(RenderType.gui()));
         if (blueprint != null && blueprintElapsed >= 0L && blueprintAlpha > 0.0F) {
             drawBlueprint(overlay, originX, originY, scale, field);
         }
@@ -533,7 +534,13 @@ final class SiteTerrainRenderer {
                     + "，帧数 " + frames + "（约 " + (frames * 1000L / 2000L) + " fps）"
                     + "，GC 这 2 秒 +" + (gcCount - lastLogGcCount) + " 次/+"
                     + (gcTime - lastLogGcMillis) + " ms"
-                    + "，缩放 " + String.format(java.util.Locale.ROOT, "%.2f", zoom));
+                    + "，缩放 " + String.format(java.util.Locale.ROOT, "%.2f", zoom)
+                    // TODO 临时诊断：几何到底落在屏幕哪儿、GL 状态是什么
+                    + "，原点 " + String.format(java.util.Locale.ROOT, "%.1f,%.1f", originX, originY)
+                    + "，缩放px " + String.format(java.util.Locale.ROOT, "%.1f", scale)
+                    + "，深度测试 " + org.lwjgl.opengl.GL11.glIsEnabled(org.lwjgl.opengl.GL11.GL_DEPTH_TEST)
+                    + "，剔除 " + org.lwjgl.opengl.GL11.glIsEnabled(org.lwjgl.opengl.GL11.GL_CULL_FACE)
+                    + "，混合 " + org.lwjgl.opengl.GL11.glIsEnabled(org.lwjgl.opengl.GL11.GL_BLEND));
             frameCountSinceLog = 0;
             lastLogGcCount = gcCount;
             lastLogGcMillis = gcTime;

@@ -6,7 +6,7 @@ import dev.yard.site.schematic.Schematic;
 import dev.yard.site.schematic.SchematicOutline;
 import dev.yard.site.schematic.SchematicReader;
 import dev.yard.site.schematic.SchematicTransform;
-import net.neoforged.fml.loading.FMLPaths;
+import dev.yard.site.platform.Platform;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -67,7 +67,7 @@ public final class SchematicStructure {
 
     /** 自动认文件的地方：{@code config/yardsite/structures/}（整合包作者只管往里丢）。 */
     public static Path structuresDir() {
-        return FMLPaths.CONFIGDIR.get().resolve("yardsite").resolve("structures");
+        return Platform.configDir().resolve("yardsite").resolve("structures");
     }
 
     /**
@@ -94,7 +94,7 @@ public final class SchematicStructure {
         }
         if (value != null && !value.isBlank()) {
             Path path = Path.of(value.trim());
-            return path.isAbsolute() ? path : FMLPaths.GAMEDIR.get().resolve(path);
+            return path.isAbsolute() ? path : Platform.gameDir().resolve(path);
         }
         return autoPick();
     }

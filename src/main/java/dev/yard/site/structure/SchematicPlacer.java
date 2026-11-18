@@ -16,8 +16,6 @@ import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
-import net.neoforged.neoforge.event.server.ServerStartedEvent;
-import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 import java.util.Map;
 import java.util.Optional;
@@ -73,9 +71,8 @@ public final class SchematicPlacer {
         job = null;
     }
 
-    public static void onServerStarted(ServerStartedEvent event) {
+    public static void serverStarted(MinecraftServer server) {
         if (pending == null) return;
-        MinecraftServer server = event.getServer();
         ServerLevel level = server.overworld();
         Schematic schematic = SchematicStructure.get();
         if (schematic == null) {
@@ -93,9 +90,8 @@ public final class SchematicPlacer {
                 + (job.flatten ? "，先整平" : "，不整平"));
     }
 
-    public static void onServerTick(ServerTickEvent.Post event) {
+    public static void serverTick(MinecraftServer server) {
         if (job == null) return;
-        MinecraftServer server = event.getServer();
         if (startAtTick >= 0) {
             if (server.getTickCount() < startAtTick) return;
             startAtTick = -1;

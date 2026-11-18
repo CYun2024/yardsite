@@ -1,0 +1,168 @@
+plugins {
+    id 'net.minecraftforge.gradle' version '6.0.43'
+    id 'org.spongepowered.mixin' version '0.7.38'
+}
+
+def minecraft_version = project.property('minecraft_version')
+def forge_version = project.property('forge_version')
+def mixin_version = project.property('mixin_version')
+def mod_version = project.property('mod_version')
+def mod_group = project.property('mod_group')
+
+group = mod_group
+version = "${mod_version}+${minecraft_version}-forge"
+base.archivesName = 'yardsite'
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+minecraft {
+    // 源码全程 Mojmap（official），和核心/1.21.1 保持一致；生产环境由 ForgeGradle reobf
+    mappings channel: 'official', version: minecraft_version
+    copyIdeResources = true
+
+    runs {
+        client {
+            workingDirectory project.file('run')
+            property 'forge.logging.console.level', 'info'
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
+            mods {
+                yardsite {
+                    source sourceSets.main
+                }
+            }
+        }
+        server {
+            workingDirectory project.file('run')
+            property 'forge.logging.console.level', 'info'
+            mods {
+                yardsite {
+                    source sourceSets.main
+                }
+            }
+        }
+    }
+}
+
+mixin {
+    add sourceSets.main, 'yardsite.refmap.json'
+    config 'yardsite.forge.core.mixins.json'
+    config 'yardsite.forge.mixins.json'
+}
+
+repositories {
+    maven { url = 'https://maven.minecraftforge.net/' }
+    maven { url = 'https://repo.spongepowered.org/repository/maven-public/' }
+    mavenCentral()
+}
+
+// 1.20.1 的少量方法签名/API 与 1.21.1 不同。共享源码先复制到 build 目录做定点替换，
+// 再和本工程的 Forge 平台代码一起编译；仓库里仍然只有上一级 src/main/java 一份源码
+// （本工程嵌在核心工程目录里，monorepo 与独立仓库两种布局下 ../src/main/java 都成立）。
+def generatedForgeSources = layout.buildDirectory.dir('generated/forge-src')
+def generateForgeSources = tasks.register('generateForgeSources', Sync) {
+    from('../src/main/java') {
+        // 1.21.1 NeoForge 平台实现、Sodium mixin、以及 1.20.1 有专门替代的 mixin 不进来
+        exclude 'dev/yard/site/platform/neoforge/**'
+        exclude 'dev/yard/site/mixin/sodium/**'
+        exclude 'dev/yard/site/mixin/CameraMixin.java'
+        exclude 'dev/yard/site/mixin/WorldOpenFlowsMixin.java'
+    }
+    into generatedForgeSources
+    filter { line ->
+        def out = line
+                .replace('renderBackground(GuiGraphics g, int mouseX, int mouseY, float partialTick)',
+                        'renderBackground(GuiGraphics g)')
+                .replace('super.renderBackground(g, mouseX, mouseY, partialTick);',
+                        'super.renderBackground(g);')
+                // 1.20.1 的 Screen 不会自己调 renderBackground（1.20.2 起才会），
+                // 屏幕在 render 里补的那一次要跟着换成单参数版本
+                .replace('renderBackground(g, mouseX, mouseY, partialTick);',
+                        'this.renderBackground(g);')
+                .replace('mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY)',
+                        'mouseScrolled(double mouseX, double mouseY, double scrollY)')
+                .replace('super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);',
+                        'super.mouseScrolled(mouseX, mouseY, scrollY);')
+                .replace('ResourceLocation.fromNamespaceAndPath("minecraft", "unknown")',
+                        'ResourceLocation.tryParse("minecraft:unknown")')
+                .replace('ResourceLocation.parse(', 'ResourceLocation.tryParse(')
+                .replace('GameRules.RULE_SPAWN_CHUNK_RADIUS', 'GameRules.RULE_SPAWN_RADIUS')
+                .replace('c.addVertex(', 'c.vertex(')
+                .replace('drawMap(g, mouseX, mouseY);', 'drawMap(g, this.lastMouseX, this.lastMouseY);')
+                .replace('getEyePosition(partialTick)', 'getEyePosition(lastPartialTick)')
+                .replace('getViewYRot(partialTick)', 'getViewYRot(lastPartialTick)')
+                .replace('getViewXRot(partialTick)', 'getViewXRot(lastPartialTick)')
+        // 顶点颜色：1.20.1 叫 color(int)，但不要碰 SiteEditorPrefs.setColor 这种普通方法
+        if (out.trim().startsWith('.setColor(')) {
+            out = out.replace('.setColor(', '.color(')
+        }
+        out = out.replace(').setColor(', ').color(')
+        // 1.20.1 的 BufferBuilder 必须 endVertex() 才计入顶点（1.21 起没这个方法）：
+        // 取消费者的地方统一换成自动补 endVertex 的包装
+        out = out.replace('return consumer;   // FORGE_WRAP',
+                'return new dev.yard.site.platform.forge.EndVertexConsumer(consumer);')
+        return out
+    }
+}
+
+sourceSets {
+    main {
+        java {
+            srcDir generateForgeSources
+            srcDir 'src/main/java'
+        }
+        resources {
+            srcDir '../src/main/resources'
+            exclude 'META-INF/neoforge.mods.toml'
+            // 共享目录里的 1.21.1 配置不要；本工程用的是 yardsite.forge.core.mixins.json
+            exclude 'yardsite.mixins.json'
+            exclude 'yardsite.sodium.mixins.json'
+
+            srcDir 'src/main/resources'
+        }
+    }
+}
+
+tasks.named('compileJava') {
+    dependsOn generateForgeSources
+}
+
+// 替换规则写在 build.gradle 里，Gradle 不会把它当任务输入；每次都重生成，避免旧产物混进来
+generateForgeSources.configure {
+    outputs.upToDateWhen { false }
+}
+
+tasks.register('copyJarToDist', Copy) {
+    dependsOn 'reobfJar'
+    from(layout.buildDirectory.dir('libs')) {
+        include '*.jar'
+        exclude '*-sources.jar', '*-javadoc.jar'
+    }
+    // 产物落点：monorepo 统一进 yard/dist；独立仓库（yardsite 根）进 <repo>/dist（已被 .gitignore 忽略）。
+    // 这份 build 文件两种目录布局都要能跑，所以按"上一级三层的 yardcreator/settings.gradle.kts 在不在"判断。
+    def forgeDir = rootProject.projectDir
+    def threeUp = forgeDir.parentFile.parentFile.parentFile
+    into(new File(threeUp, 'yardcreator/settings.gradle.kts').isFile()
+            ? new File(threeUp, 'dist')
+            : new File(forgeDir.parentFile, 'dist'))
+}
+
+tasks.named('build') {
+    finalizedBy 'copyJarToDist'
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    annotationProcessor "org.spongepowered:mixin:${mixin_version}:processor"
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+tasks.processResources {
+    from '../LICENSE'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+jar.finalizedBy('reobfJar')

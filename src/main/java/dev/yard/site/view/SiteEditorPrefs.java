@@ -1,13 +1,13 @@
 package dev.yard.site.view;
 
 import dev.yard.site.YardSiteLog;
+import dev.yard.site.platform.Platform;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.resources.ResourceLocation;
-import net.neoforged.fml.loading.FMLPaths;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
@@ -32,8 +32,10 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 final class SiteEditorPrefs {
 
-    /** 配置文件（本 mod 自己的配置目录）。 */
-    static final Path FILE = FMLPaths.CONFIGDIR.get().resolve("yardsite").resolve("site_biome_colors.json");
+    /** 配置文件（本 mod 自己的配置目录）。延迟解析，避免平台层还没装好时类初始化就先要路径。 */
+    static Path file() {
+        return Platform.configDir().resolve("yardsite").resolve("site_biome_colors.json");
+    }
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final float WIDTH_MIN = 0.5F;
@@ -60,16 +62,17 @@ final class SiteEditorPrefs {
             loaded = true;
             COLORS.clear();
             ORDER.clear();
+            Path file = file();
             try {
-                if (Files.isRegularFile(FILE)) {
+                if (Files.isRegularFile(file)) {
                     JsonElement root = JsonParser.parseString(
-                            Files.readString(FILE, StandardCharsets.UTF_8));
+                            Files.readString(file, StandardCharsets.UTF_8));
                     if (root.isJsonObject()) {
                         readFrom(root.getAsJsonObject());
                     }
                 }
             } catch (Exception e) {
-                YardSiteLog.warn("读取选址配色 " + FILE + " 失败，用默认配色：" + e);
+                YardSiteLog.warn("读取选址配色 " + file + " 失败，用默认配色：" + e);
             }
             bump(null);
         }
@@ -100,11 +103,12 @@ final class SiteEditorPrefs {
             if (rgb != null) colors.addProperty(id.toString(), hex(rgb));
         }
         root.add("biomeColors", colors);
+        Path file = file();
         try {
-            Files.createDirectories(FILE.getParent());
-            Files.writeString(FILE, GSON.toJson(root), StandardCharsets.UTF_8);
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, GSON.toJson(root), StandardCharsets.UTF_8);
         } catch (IOException e) {
-            YardSiteLog.warn("写选址配色 " + FILE + " 失败：" + e);
+            YardSiteLog.warn("写选址配色 " + file + " 失败：" + e);
         }
     }
 

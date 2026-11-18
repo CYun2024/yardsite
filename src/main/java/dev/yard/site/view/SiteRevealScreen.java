@@ -130,6 +130,10 @@ public class SiteRevealScreen extends Screen {
     private final Screen fallback;
     private final long openedAt = System.currentTimeMillis();
 
+    /** 上一帧的 partialTick：1.20.1 的 renderBackground 没有这个参数，生成源码里用它。 */
+    private float lastPartialTick;
+    /** 这一帧的背景层画过没有：1.20.2+ 由框架调 renderBackground，1.20.1 只能自己在 render 里补。 */
+    private boolean backdropDrawn;
     private SiteRevealWorldRenderer world;
     private SiteBlueprint blueprint;
     private long blueprintAt;
@@ -845,6 +849,7 @@ public class SiteRevealScreen extends Screen {
             descendMaxFrameNs = Math.max(descendMaxFrameNs, System.nanoTime() - frameStart);
             descendMaxWorldNs = Math.max(descendMaxWorldNs, worldNs);
         }
+        backdropDrawn = true;
     }
 
     // ── 临时诊断：落成动画这十几秒到底卡在哪（帧间隔 vs 我们自己的渲染）──────
@@ -948,6 +953,14 @@ public class SiteRevealScreen extends Screen {
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+        this.lastPartialTick = partialTick;
+        // 1.20.2 起框架会在 render 之前自己调 renderBackground；1.20.1 的 Screen 里没有这一下。
+        // 这一段不只是画背景：advance(frameNow) 也在里面推进落成动画，不补的话 1.20.1 会一直卡在
+        // 原地等（沙盘不出现、镜头不飞、真实区块也不交接）。
+        if (!backdropDrawn) {
+            renderBackground(g, mouseX, mouseY, partialTick);
+        }
+        backdropDrawn = false;
         super.render(g, mouseX, mouseY, partialTick);
         if (aerialAt == 0L) {
             drawInfo(g);

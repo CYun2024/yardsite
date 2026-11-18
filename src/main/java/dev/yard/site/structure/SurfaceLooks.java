@@ -1,18 +1,13 @@
 package dev.yard.site.structure;
 
-import com.mojang.blaze3d.platform.NativeImage;
 import dev.yard.site.YardSiteConfig;
 import dev.yard.site.YardSiteLog;
+import dev.yard.site.platform.ModelQuad;
+import dev.yard.site.platform.Platform;
 import dev.yard.site.schematic.Schematic;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.block.model.BakedQuad;
-import net.minecraft.client.renderer.texture.TextureAtlasSprite;
-import net.minecraft.client.resources.model.BakedModel;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
@@ -21,7 +16,6 @@ import net.minecraft.world.level.material.MapColor;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
-import net.neoforged.neoforge.client.model.data.ModelData;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -52,8 +46,6 @@ public final class SurfaceLooks {
 
     /** 同一个状态最多被问到几千次：按 "id|属性" 缓存一份外观。 */
     private static final Map<String, SurfaceLook> LOOKS = new ConcurrentHashMap<>();
-    /** 贴图名 → 平均色。资源包重载时清空。 */
-    private static final Map<ResourceLocation, Integer> SPRITE_COLORS = new ConcurrentHashMap<>();
 
     private static final Object LOCK = new Object();
     private static volatile Schematic preparedFor;
@@ -66,10 +58,6 @@ public final class SurfaceLooks {
         thread.setPriority(Thread.MIN_PRIORITY);
         return thread;
     });
-
-    private static final Direction[] SIDES = {
-            null, Direction.DOWN, Direction.UP, Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST
-    };
 
     private SurfaceLooks() {}
 
@@ -114,7 +102,7 @@ public final class SurfaceLooks {
             preparedFor = schematic;
             prepared = looks;
             int totalPieces = pieces;
-            int spriteCache = SPRITE_COLORS.size();
+            int spriteCache = Platform.models().cachedSprites();
             YardSiteLog.debug(() -> "落成外观：" + looks.length + " 种状态 / " + totalPieces + " 张面片（"
                     + (System.nanoTime() - started) / 1_000_000L + " ms，贴图色 " + spriteCache + " 张）");
             return looks;
@@ -125,7 +113,7 @@ public final class SurfaceLooks {
     public static void invalidate() {
         synchronized (LOCK) {
             LOOKS.clear();
-            SPRITE_COLORS.clear();
+            Platform.models().invalidate();
             preparedFor = null;
             prepared = null;
         }
@@ -183,40 +171,21 @@ public final class SurfaceLooks {
      * 让调用方退回形状盒。
      */
     private static List<SurfaceLook.Piece> modelPieces(BlockState state, String id, int mapColor) {
-        Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft == null || minecraft.getModelManager() == null) return List.of();
-        BakedModel model = minecraft.getModelManager().getBlockModelShaper().getBlockModel(state);
-        if (model == null || model == minecraft.getModelManager().getMissingModel() || model.isCustomRenderer()) {
-            return List.of();
-        }
+        List<ModelQuad> quads = Platform.models().quads(state);
+        if (quads.isEmpty()) return List.of();
         List<SurfaceLook.Piece> pieces = new ArrayList<>();
-        RandomSource random = RandomSource.create(42L);
-        for (Direction side : SIDES) {
-            List<BakedQuad> quads;
-            try {
-                quads = model.getQuads(state, side, random, ModelData.EMPTY, null);
-            } catch (RuntimeException | LinkageError broken) {
-                return List.of();
-            }
-            if (quads == null) continue;
-            for (BakedQuad quad : quads) {
-                SurfaceLook.Piece piece = piece(quad, id, mapColor);
-                if (piece != null) pieces.add(piece);
-            }
+        for (ModelQuad quad : quads) {
+            SurfaceLook.Piece piece = piece(quad, id, mapColor);
+            if (piece != null) pieces.add(piece);
         }
         return pieces;
     }
 
     /** 一张模型四边面 → 面片；退化面（零面积）返回 {@code null}。 */
-    private static SurfaceLook.Piece piece(BakedQuad quad, String id, int mapColor) {
-        int[] data = quad.getVertices();
-        if (data.length < 32) return null;
-        float[] corners = new float[12];
+    private static SurfaceLook.Piece piece(ModelQuad quad, String id, int mapColor) {
+        float[] corners = quad.corners();
+        if (corners.length < 12) return null;
         for (int v = 0; v < 4; v++) {
-            // BakedQuad 的顶点已经是 0..1（FaceBakery.setupShape 除过 16），不要再除
-            corners[v * 3] = Float.intBitsToFloat(data[v * 8]);
-            corners[v * 3 + 1] = Float.intBitsToFloat(data[v * 8 + 1]);
-            corners[v * 3 + 2] = Float.intBitsToFloat(data[v * 8 + 2]);
             if (!Float.isFinite(corners[v * 3]) || !Float.isFinite(corners[v * 3 + 1])
                     || !Float.isFinite(corners[v * 3 + 2])) {
                 return null;
@@ -238,9 +207,9 @@ public final class SurfaceLooks {
         ny /= len;
         nz /= len;
 
-        int rgb = spriteColor(quad.getSprite());
+        int rgb = quad.spriteColor();
         if (rgb == 0) rgb = mapColor;
-        if (quad.isTinted()) rgb = multiply(rgb, tint(id));
+        if (quad.tinted()) rgb = multiply(rgb, tint(id));
 
         // 非轴对齐的面（十字花草、斜撑）vanilla 本来就不做背面剔除，这里照样标成双面
         boolean doubleSided = Math.abs(nx) < 0.99F && Math.abs(ny) < 0.99F && Math.abs(nz) < 0.99F;
@@ -320,53 +289,6 @@ public final class SurfaceLooks {
     }
 
     // ── 颜色 ────────────────────────────────────────────────────────────
-
-    /**
-     * 贴图平均色：跳过全透明像素，按透明度加权（避免半透明边缘把颜色拖黑）。
-     *
-     * @return 0 = 读不出来（调用方退回地图色）
-     */
-    private static int spriteColor(TextureAtlasSprite sprite) {
-        if (sprite == null || sprite.contents() == null) return 0;
-        ResourceLocation key = sprite.contents().name();
-        Integer cached = SPRITE_COLORS.get(key);
-        if (cached != null) return cached;
-        int rgb = sample(sprite);
-        SPRITE_COLORS.put(key, rgb);
-        return rgb;
-    }
-
-    private static int sample(TextureAtlasSprite sprite) {
-        try {
-            NativeImage image = sprite.contents().getOriginalImage();
-            if (image == null) return 0;
-            int width = image.getWidth();
-            int height = image.getHeight();
-            long r = 0;
-            long g = 0;
-            long b = 0;
-            long weight = 0;
-            for (int y = 0; y < height; y++) {
-                for (int x = 0; x < width; x++) {
-                    int pixel = image.getPixelRGBA(x, y);
-                    int alpha = (pixel >>> 24) & 255;
-                    if (alpha < 8) continue;
-                    // NativeImage 的 RGBA 是 ABGR 打包：低 8 位才是红
-                    r += (pixel & 255) * (long) alpha;
-                    g += ((pixel >>> 8) & 255) * (long) alpha;
-                    b += ((pixel >>> 16) & 255) * (long) alpha;
-                    weight += alpha;
-                }
-            }
-            if (weight == 0) return 0;
-            int cr = (int) (r / weight);
-            int cg = (int) (g / weight);
-            int cb = (int) (b / weight);
-            return (cr << 16) | (cg << 8) | cb;
-        } catch (RuntimeException broken) {
-            return 0;
-        }
-    }
 
     /** 带 tint 的面：树叶/草乘植被绿，水乘水色，其它原色。 */
     private static int tint(String id) {

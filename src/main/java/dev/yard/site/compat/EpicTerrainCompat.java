@@ -1,12 +1,13 @@
 package dev.yard.site.compat;
 
 import dev.yard.site.YardSiteLog;
+import dev.yard.site.platform.Platform;
 import dev.yard.site.worldgen.SurfaceProbe;
+
 import net.minecraft.core.Registry;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
-import net.neoforged.fml.ModList;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -73,7 +74,7 @@ public final class EpicTerrainCompat {
     @Nullable
     private static String hitFrom(RegistryAccess registries) {
         for (String modid : MOD_IDS) {
-            if (ModList.get().isLoaded(modid)) return "mod " + modid;
+            if (Platform.isModLoaded(modid)) return "mod " + modid;
         }
         if (hasNamespace(registries, Registries.BIOME) || hasNamespace(registries, Registries.DENSITY_FUNCTION)
                 || hasNamespace(registries, Registries.PLACED_FEATURE)) {
@@ -84,8 +85,6 @@ public final class EpicTerrainCompat {
 
     /** 某个动态注册表里有没有 {@code etn} 命名空间的条目。 */
     private static <T> boolean hasNamespace(RegistryAccess registries, ResourceKey<? extends Registry<T>> registryKey) {
-        return registries.lookupOrThrow(registryKey).listElements()
-                .anyMatch(reference -> NAMESPACE.equals(reference.unwrapKey()
-                        .map(key -> key.location().getNamespace()).orElse("")));
+        return Platform.registryHasNamespace(registries, registryKey, NAMESPACE);
     }
 }

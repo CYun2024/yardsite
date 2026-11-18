@@ -1,0 +1,41 @@
+modLoader = "javafml"
+loaderVersion = "[47,)"
+license = "MIT"
+
+[[mods]]
+modId = "yardsite"
+version = "0.2.0"
+displayName = "Yard Site · 群系选区"
+authors = "CYun_CYER"
+logoFile = "icon.png"
+description = '''
+创建单人世界前先看一张出生点附近的地形与群系图，把落点定准，再随一段落成镜头进世界。
+单独安装时选出来的是出生点；同时安装庭院系列时，同一个落点会变成庭院占地；
+指一份投影文件（.litematic / .nbt / .schem）时，同一个落点就是这栋建筑的位置——
+线框按它的真实外壳画，进世界后由本 mod 铺方块。投影格式自带解析，不需要装投影 mod。
+（1.20.1 Forge 版）
+'''
+
+[modproperties.yardsite]
+    mixins = ["yardsite.forge.core.mixins.json", "yardsite.forge.mixins.json"]
+
+[[dependencies.yardsite]]
+    modId = "forge"
+    mandatory = true
+    versionRange = "[47,48)"
+    ordering = "NONE"
+    side = "BOTH"
+
+[[dependencies.yardsite]]
+    modId = "minecraft"
+    mandatory = true
+    versionRange = "[1.20.1,1.20.2)"
+    ordering = "NONE"
+    side = "BOTH"
+
+[[dependencies.yardsite]]
+    modId = "yardcore"
+    mandatory = false
+    versionRange = "*"
+    ordering = "AFTER"
+    side = "BOTH"

@@ -1,17 +1,12 @@
 package dev.yard.site.client;
 
 import dev.yard.site.YardSiteLog;
-import dev.yard.site.YardSite;
+import dev.yard.site.platform.Platform;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.chunk.ChunkAccess;
-import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.level.levelgen.Heightmap;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.client.event.ClientTickEvent;
 
 /**
  * 临时诊断：测「点创建 → 进世界」「进世界 → 周围半径 6 / 12 区块客户端编译完」各要多久。
@@ -20,7 +15,6 @@ import net.neoforged.neoforge.client.event.ClientTickEvent;
  * （和原版 LevelLoadStatusManager 同判据）按玩家登录时的区块为原点、每秒扫一次方形半径，
  * 记录每次完整编译完的里程碑；日志关键词是 {@code [yardsite] 加载计时}。
  */
-@EventBusSubscriber(modid = YardSite.MODID, value = Dist.CLIENT)
 public final class ChunkLoadDiagnostics {
 
     private static final int[] MILESTONES = {3, 6, 12};
@@ -54,8 +48,8 @@ public final class ChunkLoadDiagnostics {
         markedLoginAtMs = ms;
     }
 
-    @SubscribeEvent
-    public static void onClientTick(ClientTickEvent.Post event) {
+    /** 客户端每 tick 调一次；事件注册由平台层负责。 */
+    public static void tick() {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null || mc.player == null) {
             if (loginAtMs != 0L) resetRun();
@@ -142,12 +136,12 @@ public final class ChunkLoadDiagnostics {
 
     /** 区块中心那一列的地表 section 编译好了没有。 */
     private static boolean chunkReady(Minecraft mc, ClientLevel level, int chunkX, int chunkZ) {
-        ChunkAccess chunk = level.getChunkSource().getChunk(chunkX, chunkZ, ChunkStatus.FULL, false);
+        ChunkAccess chunk = Platform.client().chunkAt(level, chunkX, chunkZ);
         if (chunk == null) return false;
         int surface = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, 8, 8);
         int y = Math.max(level.getMinBuildHeight(), surface - 1);
         probe.set(chunkX * 16 + 8, y, chunkZ * 16 + 8);
-        return mc.levelRenderer.isSectionCompiled(probe);
+        return Platform.client().sectionCompiled(mc, probe);
     }
 
     private static int countWithin(int[] readyByDistance, int radius) {

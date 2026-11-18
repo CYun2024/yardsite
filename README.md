@@ -105,11 +105,23 @@ Biome color adjustments are stored in `config/yardsite/site_biome_colors.json`.
 ## Building
 
 ```bash
-./gradlew build       # jar output in build/libs/
-./gradlew runClient   # development client
+./gradlew build                    # 1.21.1 NeoForge → build/libs/
+./gradlew -p forge-1.20.1 build    # 1.20.1 Forge     → dist/
+./gradlew runClient                # development client
 ```
 
 Sodium is used only for optional compile-time culling hooks. Place the corresponding Sodium jar in `libs/` to enable them; the build succeeds without it.
+
+### 1.20.1 Forge (legacy)
+
+`forge-1.20.1/` is a **separate Gradle build** (ForgeGradle 6 + MixinGradle) that shares the same core sources rather than duplicating them:
+
+1. `generateForgeSources` copies `src/main/java` into `forge-1.20.1/build/generated/forge-src`;
+2. a short table of exact string replacements (in `forge-1.20.1/build.gradle`) adapts the 1.20.1 API differences;
+3. the result is compiled together with the Forge platform classes in `forge-1.20.1/src/main/java/dev/yard/site/platform/forge`.
+
+So **there is still only one copy of the core code**: fix it here, and both jars pick it up. Changes that only touch `forge-1.20.1/` (mods.toml, mixins, platform classes, replacements) do not affect the NeoForge build. The jar lands in `dist/` at the repository root and is not committed.
+
 
 ## Development notes
 

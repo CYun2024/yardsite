@@ -6,8 +6,10 @@ import dev.yard.site.api.SiteLink;
 import dev.yard.site.api.SiteLinks;
 import dev.yard.site.api.SitePlan;
 import dev.yard.site.compat.EpicTerrainCompat;
+import dev.yard.site.platform.Platform;
+import dev.yard.site.platform.SpawnSetter;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.Registries;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.GameRules;
@@ -18,14 +20,12 @@ import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.RandomState;
-import net.neoforged.neoforge.event.level.LevelEvent;
-import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import org.jetbrains.annotations.Nullable;
 
 /**
  * 新世界初始化时接管出生点：玩家在选区图上点了哪里，原版就把出生点放在哪里。
  *
- * <p>NeoForge 在 {@code MinecraftServer.setInitialSpawn} 里给了一个可取消事件
+ * <p>平台层在 {@code MinecraftServer.setInitialSpawn} 的可取消事件（Fabric 则是 Mixin）里转进来
  * （<b>只在 {@code !levelData.isInitialized()} 时触发</b>，也就是建新世界/重建世界）。
  * 我们取消它、自己设 spawn，原版就不会先在随机位置找出生点，随后
  * {@code prepareLevels} 会直接围着选区生成「出生点区块」——这正是「确定后生成选区附近的区块」。
@@ -46,16 +46,16 @@ public final class SiteSpawnHandler {
 
     private SiteSpawnHandler() {}
 
-    public static void onCreateSpawnPosition(LevelEvent.CreateSpawnPosition event) {
-        if (!YardSiteConfig.SPAWN_SITE_SELECT.get()) return;
-        if (!(event.getLevel() instanceof ServerLevel level)) return;
-        if (level.dimension() != Level.OVERWORLD) return;
+    /** 接管出生点；返回 true 表示已自行设置，平台层应取消原版的随机找点。 */
+    public static boolean handle(ServerLevel level, SpawnSetter settings) {
+        if (!YardSiteConfig.SPAWN_SITE_SELECT.get()) return false;
+        if (level.dimension() != Level.OVERWORLD) return false;
 
         SiteLink link = SiteLinks.get();
-        if (link != null && !link.siteSelectEnabled()) return;
+        if (link != null && !link.siteSelectEnabled()) return false;
 
         SiteSelection.Pending pending = SiteSelection.take(level.getSeed());
-        if (pending == null) return;
+        if (pending == null) return false;
 
         long startedAt = System.currentTimeMillis();
         ChunkGenerator generator = level.getChunkSource().getGenerator();
@@ -78,7 +78,7 @@ public final class SiteSpawnHandler {
             chunkRadius = level.getGameRules().getInt(GameRules.RULE_SPAWN_CHUNK_RADIUS);
         }
         // 早进世界：加载期把半径压到 SiteFastLoad.LOAD_RADIUS（1 = 等 9 个区块，约 2～3 秒），
-        // 正式半径由 SiteFastLoad 在 ServerStartedEvent（prepareLevels 之后、开始 tick 之前）补回去。
+        // 正式半径由 SiteFastLoad 在服务器启动事件（prepareLevels 之后、开始 tick 之前）补回去。
         // 世界渲染阶段只有登录后才存在，所以"真区块一块块顶掉沙盘柱子"只能发生在登录后 —— 生成挪过去。
         boolean early = YardSiteConfig.SITE_EARLY_ENTRY.get() && YardSiteConfig.SITE_REVEAL_ANIM.get();
         if (early) {
@@ -89,8 +89,7 @@ public final class SiteSpawnHandler {
             level.getGameRules().getRule(GameRules.RULE_SPAWN_CHUNK_RADIUS).set(chunkRadius, null);
         }
 
-        event.getSettings().setSpawn(spawn, 0.0F);
-        event.setCanceled(true);
+        settings.setSpawn(spawn, 0.0F);
 
         plan = new SitePlan(plan.siteX(), plan.siteZ(),
                 plan.originX(), plan.originY(), plan.originZ(),
@@ -105,19 +104,20 @@ public final class SiteSpawnHandler {
                 + (early ? "，加载期先按 " + SiteFastLoad.LOAD_RADIUS + " 放行登录、进世界后再补生成"
                         : "，原版先等这些区块生成完")
                 + "（规划耗时 " + (System.currentTimeMillis() - startedAt) + " ms）");
+        return true;
     }
 
     /**
      * 独立安装时的 y 修正：规划阶段只有「雕刻与地物之前」的地形，树、雪层这些要在区块生成之后才知道。
-     * 出生点区块生成完（{@link ServerStartedEvent}，早于玩家连接）就用真实高度图再对一次，
+     * 出生点区块生成完（服务器启动事件，早于玩家连接）就用真实高度图再对一次，
      * 只改 y、不改 x/z，所以出生点区块的 ticket 不会跨区块，也不会多生成一片地。
      *
      * <p>有联动方时不做：那时出生点在建筑内部，y 是按占地统一规划好的，改了就跑到屋顶上去了。
      */
-    public static void onServerStarted(ServerStartedEvent event) {
+    public static void serverStarted(MinecraftServer server) {
         SitePlan plan = SiteRevealState.plan();
         if (plan == null || plan.hasPlot()) return;
-        ServerLevel level = event.getServer().overworld();
+        ServerLevel level = server.overworld();
         BlockPos spawn = level.getSharedSpawnPos();
         int surface = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, spawn.getX(), spawn.getZ());
         if (surface <= level.getMinBuildHeight() || surface == spawn.getY()) return;
@@ -162,6 +162,6 @@ public final class SiteSpawnHandler {
         NoiseGeneratorSettings settings = generator instanceof NoiseBasedChunkGenerator noise
                 ? noise.generatorSettings().value()
                 : NoiseGeneratorSettings.dummy();
-        return RandomState.create(settings, level.registryAccess().lookupOrThrow(Registries.NOISE), level.getSeed());
+        return Platform.createRandomState(settings, level.registryAccess(), level.getSeed());
     }
 }

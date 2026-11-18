@@ -1,17 +1,5 @@
 package dev.yard.site;
 
-import dev.yard.site.structure.SchematicPlacer;
-import dev.yard.site.structure.SchematicStructure;
-import dev.yard.site.worldgen.SiteFastLoad;
-import dev.yard.site.worldgen.SiteRevealState;
-import dev.yard.site.worldgen.SiteSpawnHandler;
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.fml.ModContainer;
-import net.neoforged.fml.common.Mod;
-import net.neoforged.fml.config.ModConfig;
-import net.neoforged.neoforge.common.NeoForge;
-import net.neoforged.neoforge.event.server.ServerStoppingEvent;
-
 /**
  * 群系选区：创建单人世界前先看一张出生点附近的地形/群系图，把落点定准，再走一段落成镜头进世界。
  *
@@ -29,28 +17,8 @@ import net.neoforged.neoforge.event.server.ServerStoppingEvent;
  * <p>本 mod 不依赖任何其它 mod 的类：联动方实现 {@code SiteLink} 接口并注册，反向用反射兜底
  * （见 {@link dev.yard.site.api.SiteLinks}）。
  */
-@Mod(YardSite.MODID)
-public class YardSite {
+public final class YardSite {
     public static final String MODID = "yardsite";
 
-    public YardSite(IEventBus modBus, ModContainer container) {
-        container.registerConfig(ModConfig.Type.COMMON, YardSiteConfig.SPEC);
-        // 结构模式自动认文件用的目录先建出来，作者把投影丢进去就能用（建不出来也无所谓）
-        SchematicStructure.ensureStructuresDir();
-        // 建新世界：把出生点放到选区里，跳过原版"随机找出生点"
-        NeoForge.EVENT_BUS.addListener(SiteSpawnHandler::onCreateSpawnPosition);
-        // 早进世界：加载期半径压小，服务器一起来就恢复正式半径并补回 START ticket
-        NeoForge.EVENT_BUS.addListener(SiteFastLoad::onServerStarted);
-        // 独立安装：出生点区块生成完之后用真实高度图对一次 y（树/雪层在规划阶段看不到）
-        NeoForge.EVENT_BUS.addListener(SiteSpawnHandler::onServerStarted);
-        // 结构模式：把投影文件里的方块铺到选中的位置上（没开结构模式时什么都不会发生）
-        NeoForge.EVENT_BUS.addListener(SchematicPlacer::onServerStarted);
-        NeoForge.EVENT_BUS.addListener(SchematicPlacer::onServerTick);
-        // 这两个是进程内状态：换存档必须清空，否则旧世界的落点/半径会被带到新世界
-        NeoForge.EVENT_BUS.addListener((ServerStoppingEvent event) -> {
-            SiteRevealState.reset();
-            SiteFastLoad.clear();
-            SchematicPlacer.clear();
-        });
-    }
+    private YardSite() {}
 }

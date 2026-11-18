@@ -7,6 +7,8 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import dev.yard.site.api.BlueprintBox;
 import dev.yard.site.api.BlueprintLine;
 import dev.yard.site.api.SitePlan;
+import dev.yard.site.platform.Platform;
+import dev.yard.site.platform.Vertices;
 import dev.yard.site.schematic.SchematicHiddenLines;
 import dev.yard.site.structure.SurfaceMesh;
 import dev.yard.site.worldgen.SiteRevealState;
@@ -14,7 +16,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.util.Mth;
-import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -716,8 +717,7 @@ final class SiteRevealWorldRenderer {
             for (int col = 0; col < chunkCols; col++) {
                 int index = row * chunkCols + col;
                 if (dataAt[index] == 0L
-                        && mc.level.getChunkSource().getChunk(chunkBaseX + col, chunkBaseZ + row,
-                        ChunkStatus.FULL, false) != null) {
+                        && Platform.client().chunkArrived(mc.level, chunkBaseX + col, chunkBaseZ + row)) {
                     // +1：0 继续表示“还没到货”
                     dataAt[index] = revealClockMs + 1L;
                 }
@@ -1072,7 +1072,7 @@ final class SiteRevealWorldRenderer {
         this.height = Math.max(1, height);
         this.aspect = this.width / (double) this.height;
         this.frameNow = now;
-        this.lineWidth = YardSiteConfig.REVEAL_LINE_WIDTH.get().floatValue();
+        this.lineWidth = (float) YardSiteConfig.REVEAL_LINE_WIDTH.get();
         this.lineGlow = YardSiteConfig.REVEAL_LINE_GLOW.get();
         this.surfaceScan = YardSiteConfig.REVEAL_SURFACE_SCAN.get();
         updateDrawSource();
@@ -1087,7 +1087,7 @@ final class SiteRevealWorldRenderer {
             return;
         }
 
-        VertexConsumer consumer = g.bufferSource().getBuffer(RenderType.gui());
+        VertexConsumer consumer = Vertices.wrap(g.bufferSource().getBuffer(RenderType.gui()));
         // 整张场地都画：柱子盖住整个视野，按距离一圈圈淡，真世界才不会被提前看见
         long tCollect0 = System.nanoTime();
         orderCount[0] = 0;

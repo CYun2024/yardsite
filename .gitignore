@@ -3,6 +3,10 @@
 build/
 out/
 
+# 构建产物（独立仓库里 forge-1.20.1 会往 <repo>/dist 落 jar；
+# monorepo 里由 yard/.gitignore 兜住，独立仓库必须自己声明，否则 dist/ 会变成待提交目录）
+dist/
+
 # IDE
 .idea/
 *.iml

@@ -3,13 +3,13 @@ package dev.yard.site.view;
 import dev.yard.site.YardSiteLog;
 import dev.yard.site.compat.EpicTerrainCompat;
 import dev.yard.site.compat.TerraBlenderCompat;
+import dev.yard.site.platform.Platform;
 import dev.yard.site.worldgen.SurfaceProbe;
 import dev.yard.site.worldgen.SurfaceTrend;
 import net.minecraft.client.gui.screens.worldselection.WorldCreationContext;
 import net.minecraft.core.Holder;
 import net.minecraft.core.QuartPos;
 import net.minecraft.core.RegistryAccess;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.biome.Biome;
@@ -278,7 +278,7 @@ final class ChunkSitePlanner implements AutoCloseable {
                 : NoiseGeneratorSettings.dummy();
         RegistryAccess.Frozen registries = context.worldgenLoadContext();
         long seed = context.options().seed();
-        this.randomState = RandomState.create(settings, registries.lookupOrThrow(Registries.NOISE), seed);
+        this.randomState = Platform.createRandomState(settings, registries, seed);
         this.biomeSource = TerraBlenderCompat.previewSource(generator, stem.type(), registries, seed);
         this.climateSampler = randomState.sampler();
         this.probe = new SurfaceProbe(generator, randomState, minY, dimension.height(), seaLevel,
