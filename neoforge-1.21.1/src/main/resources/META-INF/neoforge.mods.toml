@@ -4,7 +4,8 @@ license="MIT"
 
 [[mods]]
 modId="yardsite"
-version="0.2.0"
+# 不要在发布文件里手改版本号：构建时由 ../versions.properties 注入（见 build.gradle.kts 的 processResources）
+version="@MOD_VERSION@"
 displayName="Yard Site · 群系选区"
 authors="CYun_CYER"
 description='''创建单人世界前先看一张出生点附近的地形与群系图，把落点定准，再随一段落成镜头进世界。

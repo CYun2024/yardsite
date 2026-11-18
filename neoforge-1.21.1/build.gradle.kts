@@ -29,12 +29,15 @@ val mod_version: String = sharedVersions.getProperty("mod_version")
 val mod_group: String = sharedVersions.getProperty("mod_group")
     ?: throw GradleException("versions.properties 缺 mod_group")
 
+val minecraft_version: String by project
 val neoforge_version: String by project
 val parchment_minecraft_version: String by project
 val parchment_mappings_version: String by project
 
 group = mod_group
-version = mod_version
+// 产物名与 Forge 外壳统一：yardsite-<ver>+<mc>-<loader>.jar
+// 例：yardsite-0.2.1+1.21.1-neoforge.jar / yardsite-0.2.1+1.20.1-forge.jar
+version = "$mod_version+$minecraft_version-neoforge"
 base.archivesName = "yardsite"
 
 neoForge {
@@ -79,8 +82,23 @@ tasks.withType<JavaCompile> {
 }
 
 // MIT 要求分发时附带许可证正文：把仓库根的 LICENSE 打一份进 jar 根目录。
+// 同时把 mods.toml 里的 @MOD_VERSION@ 换成 versions.properties 的版本号 —— 元数据里的版本
+// 和文件名必须同源，否则 NeoForge 会按 toml 里那个版本认 mod（升级时最容易在这里对不上）。
 tasks.processResources {
     from("../LICENSE")
+    val modVersion = mod_version
+    inputs.property("modsTomlVersion", modVersion)
+    doLast {
+        val file = layout.buildDirectory.file("resources/main/META-INF/neoforge.mods.toml").get().asFile
+        if (file.isFile) {
+            val text = file.readText()
+            val replaced = text.replace("@MOD_VERSION@", modVersion)
+            if (replaced.contains("@MOD_VERSION@")) {
+                throw GradleException("neoforge.mods.toml 里的 @MOD_VERSION@ 没替换掉，检查 processResources 配置")
+            }
+            if (replaced != text) file.writeText(replaced)
+        }
+    }
 }
 
 afterEvaluate {

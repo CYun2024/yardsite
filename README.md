@@ -55,11 +55,21 @@ Enable `structure.enabled` to display the structure footprint on the selection m
 - When installed with the Yard series, the selected position is used as the yard plot; the Yard series plans the building and spawn point.
 - Neither side requires the other; both can be installed separately or together.
 
+## Versions and downloads
+
+Each jar targets exactly one "Minecraft version + loader" pair, and the file name says which:
+
+| File | For |
+|---|---|
+| `yardsite-0.2.1+1.21.1-neoforge.jar` | Minecraft 1.21.1 · NeoForge 21.1.x · Java 21 |
+| `yardsite-0.2.1+1.20.1-forge.jar` | Minecraft 1.20.1 · Forge 47.x · Java 17 |
+
+Drop it into `mods/`. No required dependencies. See [CHANGELOG.md](CHANGELOG.md) for what changed.
+
 ## Requirements
 
-- Minecraft 1.21.1, NeoForge 21.1.x, Java 21.
 - No required dependencies. Projection files are parsed by this mod.
-- Sodium is not required (Sodium support was removed in 0.2.0 — vanilla rendering performs the same).
+- Sodium is not required (Sodium support was removed in 0.2.1 — vanilla rendering performs the same).
 - Applies to single-player and LAN world creation only. Dedicated servers do not have this flow.
 
 ## Configuration

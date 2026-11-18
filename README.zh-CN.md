@@ -55,11 +55,21 @@
 - 与庭院系列共同安装时，选中位置作为庭院占地，由庭院系列规划建筑与出生点。
 - 两边无强制依赖，可单独安装或共同安装。
 
+## 版本与下载
+
+每个 jar 只对应一个「Minecraft 版本 + 加载器」组合，文件名里写得很清楚：
+
+| 文件 | 适用 |
+|---|---|
+| `yardsite-0.2.1+1.21.1-neoforge.jar` | Minecraft 1.21.1 · NeoForge 21.1.x · Java 21 |
+| `yardsite-0.2.1+1.20.1-forge.jar` | Minecraft 1.20.1 · Forge 47.x · Java 17 |
+
+放进 `mods/` 即可，无必需前置。版本变更见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## 环境要求
 
-- Minecraft 1.21.1、NeoForge 21.1.x、Java 21。
 - 无必需前置；投影文件由本 mod 自行解析。
-- 不依赖 Sodium（Sodium 支持已于 0.2.0 移除，原生渲染与 Sodium 下表现一致）。
+- 不依赖 Sodium（Sodium 支持已于 0.2.1 移除，原生渲染与装 Sodium 时表现一致）。
 - 仅对单人/局域网创建世界生效；专用服务器没有此流程。
 
 ## 配置

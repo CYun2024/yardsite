@@ -170,6 +170,20 @@ tasks.withType(JavaCompile).configureEach {
 tasks.processResources {
     from '../LICENSE'
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    // mods.toml 里的 @MOD_VERSION@ 换成 versions.properties 的版本号：元数据与文件名必须同源
+    def modVersion = mod_version
+    inputs.property('modsTomlVersion', modVersion)
+    doLast {
+        def file = layout.buildDirectory.file('resources/main/META-INF/mods.toml').get().asFile
+        if (file.isFile()) {
+            def text = file.text
+            def replaced = text.replace('@MOD_VERSION@', modVersion)
+            if (replaced.contains('@MOD_VERSION@')) {
+                throw new GradleException('mods.toml 里的 @MOD_VERSION@ 没替换掉，检查 processResources 配置')
+            }
+            if (replaced != text) file.text = replaced
+        }
+    }
 }
 
 jar.finalizedBy('reobfJar')
