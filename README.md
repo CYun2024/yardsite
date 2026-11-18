@@ -25,7 +25,7 @@ If the map is dismissed without a selection, the world is created with the vanil
 - **Gold wireframe phase**: The wireframe is generated from the structure's crease edges, lit from bottom to top, with hidden-line removal based on the current camera position. When installed with the Yard series, the inn's wireframe is displayed.
 - **Surface phase**: Structure mode only. The building is drawn from baked block models, filled from bottom to top with a scan frame.
 - **Automatic framing**: Camera distance is derived from the content bounding box; structure mode uses the structure geometry.
-- **Handover and fade**: After the real terrain takes over, the building effect remains for a configurable delay and then fades in place.
+- **Modded blocks**: The block's own shape is used where available, with the baked model as a fallback. Blocks whose shape is a full cube, whose model spans several blocks, or that are drawn by a block entity renderer may appear partially or as a rough box in the animation. This only affects the animation; the placed structure matches the file.
 
 The reveal animation (`site.revealAnim`) or the surface phase (`site.revealSurface`) can be disabled in the configuration.
 

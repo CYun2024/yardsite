@@ -4,58 +4,21 @@
 
 ## 0.2.2 · 2026-11-18 — 相对 0.2.1
 
-### 中文
+**修复**
 
-**投影文件读取出错**
+- `.litematic` 投影读取：调色板超过 32 种方块时方块数据错位，预览里的方块和实际落成的方块都会放错。
+- 落成动画阶段的方块外观：楼梯内外拐角、花草的十字形状现在与方块一致；mod 方块优先按方块自身形状显示，形状不可用时退回烘焙模型。
+- 已知限制见 README 的「落成动画」一节。
 
-调色板超过 32 种方块时，`.litematic` 里的方块数据是一段连续位流（一个方块的值可以跨两个 long），
-0.2.1 按「每个 long 装固定几格」读取，从第 11 格起整体错位。表现是预览里的方块位置和形状错乱，
-实际落成的方块也跟着错。现在按连续位流读取；12×10×11 的测试结构读出 381 个方块，与文件记录一致。
+配置文件与 0.2.1 兼容，可直接沿用。
 
-**落成动画阶段的方块外观**
+**Fixed**
 
-- 楼梯的内拐角、外拐角按原版形状表绘制，动画阶段不再把它们画成直梯。
-- 花草（草、蕨、花、树苗等）画成对角交叉的两块平面，不再是整格方块。
-- mod 方块：动画阶段的几何优先取方块自身的形状，朝向、连接、内外角等状态由方块自己解释；
-  形状为空、直接报整格或越出单元格时，改用客户端烘焙模型按 1/16 体素化出盒子。
+- `.litematic` blueprints: with more than 32 palette entries the block data was misaligned, so blocks were placed incorrectly in the preview and in the final structure.
+- Block appearance in the reveal animation: stair corners and plant crosses now match the block; modded blocks use their own shape where available and fall back to the baked model otherwise.
+- Known limitations are listed under "Reveal animation" in the README.
 
-**已知限制**
-
-动画阶段对 mod 方块的兼容还不完整：形状报整格、模型跨多个方块、或由方块实体自行绘制的方块，
-在动画里可能只显示一部分，或退化为一个近似盒。影响只在落成动画，实际落成的方块与文件一致。
-排查可用 `-Dyardsite.debug=true`，日志会为每个方块打印所用的几何来源。
-
-0.2.1 的配置文件可以直接沿用。
-
----
-
-### English
-
-**Blueprint files were read incorrectly**
-
-When a palette has more than 32 block states, the block data in a `.litematic` is a continuous bit
-stream (one block's value can span two longs). 0.2.1 read it as a fixed number of cells per long,
-which shifted everything from the 11th cell onward. Blocks appeared in the wrong places and shapes in
-the preview, and the actually placed blocks were wrong as well. It now reads the stream continuously;
-the 12×10×11 test structure yields 381 blocks, matching the file's own count.
-
-**Block appearance during the reveal animation**
-
-- Inner and outer stair corners follow the vanilla shape table; they are no longer drawn as straight
-  stairs in the animation.
-- Grass, ferns, flowers and saplings are drawn as two crossed diagonal planes instead of full blocks.
-- Modded blocks: the animation geometry uses each block's own shape first, so facing, connections and
-  corner states are interpreted by the block itself. When the shape is empty, a plain full cube, or
-  extends outside the cell, the client baked model is voxelized at 1/16 resolution instead.
-
-**Known limitation**
-
-Mod compatibility during the animation is not complete: blocks whose shape is a full cube, whose model
-spans several blocks, or that are drawn by a block entity renderer may appear partially or as a rough
-box in the animation. This only affects the animation; the placed structure matches the file. Add
-`-Dyardsite.debug=true` to log which geometry source each block used.
-
-Existing 0.2.1 configs can be reused unchanged.
+Configuration is compatible with 0.2.1 and can be reused unchanged.
 
 ---
 
