@@ -25,8 +25,11 @@ import dev.yard.site.schematic.SchematicReader.Palette;
  *       {@code Position + (Size<0 ? Size+1 : 0)}，边长取绝对值。</li>
  *   <li><b>Position/Size 有三种写法</b>：{@code TAG_Int_Array}（Litematica 自己）、数字列表、
  *       以及 {@code {x,y,z}} 复合标签（按 BlockPos 编解码写的工具）。统一走 {@link Nbt#vec3}。</li>
- *   <li><b>BlockStates 是跨方块打包的</b>：每格 {@code bits = max(2, ceil(log2(调色板大小)))} 位，
- *       一个 long 装 {@code 64/bits} 格，<b>不跨 long</b>（Litematica 的做法），低字节在前。</li>
+ *   <li><b>BlockStates 是连续位流</b>：每格 {@code bits = max(2, ceil(log2(调色板大小)))} 位，
+ *       第 i 格从第 {@code i*bits} 位开始，<b>会跨 long 边界</b>（LitematicaBitArray 的做法），
+ *       低位在前；long 数组长度是 {@code ceil(格数*bits/64)}。注意这和原版 BitStorage
+ *       的「每个 long 装 64/bits 格、不跨 long」不同，按后者读会在 bits 不整除 64 时（如 6 位）
+ *       从第 11 格起全错位。</li>
  *   <li><b>可以有多个区域</b>：正门、塔楼、地下室分开存很常见。这里全部并进同一份体素里，
  *       调色板也合成一份，于是对外只看得到一个完整的建筑。</li>
  * </ul>
@@ -137,15 +140,24 @@ final class LitematicReader {
                         + " 种方块却没有 BlockStates（文件被截断了？）");
             }
             int bits = Math.max(2, 32 - Integer.numberOfLeadingZeros(paletteSize - 1));
-            int perLong = 64 / bits;
             long mask = (1L << bits) - 1L;
             int volume = rx * ry * rz;
             for (int index = 0; index < volume; index++) {
-                int word = index / perLong;
+                long bitStart = (long) index * bits;
+                int word = (int) (bitStart >>> 6);
                 if (word >= states.length) break;
-                int value = (int) ((states[word] >>> ((index % perLong) * bits)) & mask);
-                if (value >= paletteSize) continue;
-                int global = remap[value];
+                int offset = (int) (bitStart & 63);
+                long value;
+                if (offset + bits <= 64) {
+                    value = states[word] >>> offset;
+                } else {
+                    // 这一格横跨两个 long
+                    if (word + 1 >= states.length) break;
+                    value = states[word] >>> offset | states[word + 1] << (64 - offset);
+                }
+                int paletteIndex = (int) (value & mask);
+                if (paletteIndex >= paletteSize) continue;
+                int global = remap[paletteIndex];
                 if (global < 0) continue;
                 int x = index % rx;
                 int z = (index / rx) % rz;

@@ -67,8 +67,10 @@ public final class SchematicOutline {
         SchematicBoxes geometry = s.geometry();
         float[] raw = geometry.edges();
         int edgeCount = geometry.edgeCount();
-        if (edgeCount == 0) return new SchematicOutline(new float[0], new byte[0], new byte[0],
-                0, s.minY, s.maxY, 0);
+        // 只有花草时盒子棱是 0，但斜棱还得出去
+        if (edgeCount == 0 && geometry.extraEdgeCount() == 0) {
+            return new SchematicOutline(new float[0], new byte[0], new byte[0], 0, s.minY, s.maxY, 0);
+        }
 
         byte[] rawRoles = geometry.edgeRoles();
         byte[] rawSides = geometry.edgeSides();
@@ -117,13 +119,21 @@ public final class SchematicOutline {
         if (maxSegments > 0 && outCount > maxSegments) {
             kept = keepLongest(out, outCount, outRoles, outSides, maxSegments);
         }
-        float[] finalSegs = new float[kept * 6];
-        byte[] finalRoles = new byte[kept];
-        byte[] finalSides = new byte[kept];
+        // 十字花草的斜棱（对角平面）编码不进上面那套"沿单轴"的合并，原样接在最后，按细节线画
+        float[] extra = geometry.extraEdges();
+        int extraCount = geometry.extraEdgeCount();
+        int total = kept + extraCount;
+        float[] finalSegs = new float[total * 6];
+        byte[] finalRoles = new byte[total];
+        byte[] finalSides = new byte[total];
         System.arraycopy(out, 0, finalSegs, 0, kept * 6);
         System.arraycopy(outRoles, 0, finalRoles, 0, kept);
         System.arraycopy(outSides, 0, finalSides, 0, kept);
-        return new SchematicOutline(finalSegs, finalRoles, finalSides, kept, s.minY, s.maxY, edgeCount);
+        if (extraCount > 0) {
+            System.arraycopy(extra, 0, finalSegs, kept * 6, extraCount * 6);
+            java.util.Arrays.fill(finalRoles, kept, total, SchematicBoxes.SADDLE);
+        }
+        return new SchematicOutline(finalSegs, finalRoles, finalSides, total, s.minY, s.maxY, edgeCount);
     }
 
     /** 这条棱量化之后覆盖几个 1/16 单位。 */

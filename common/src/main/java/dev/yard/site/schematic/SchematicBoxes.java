@@ -62,6 +62,15 @@ public final class SchematicBoxes {
     private byte[] edgeSides;
     private int edgeCount;
 
+    /**
+     * 不是盒子能表示的棱：十字花草的两块对角平面（每段 6 个 float）。
+     *
+     * <p>{@link SchematicOutline} 的合并只认沿单轴的线段，斜棱编码不进去，所以单独存一份，
+     * 在盒子棱合并完之后原样接上。花草也没有实心盒子：遮挡判定里不会挡住别的线。
+     */
+    private float[] crossEdges = new float[0];
+    private int crossEdgeCount;
+
     private SchematicBoxes(Schematic schematic) {
         this.schematic = schematic;
         this.sizeX = schematic.sizeX;
@@ -73,17 +82,28 @@ public final class SchematicBoxes {
         List<String> ids = schematic.ids;
         List<Map<String, String>> props = schematic.props;
         float[][] shapes = new float[ids.size()][];
+        boolean[] cross = new boolean[ids.size()];
         for (int i = 0; i < ids.size(); i++) {
-            shapes[i] = BlockShapes.of(ids.get(i), props.get(i));
+            if (BlockShapes.isCrossPlant(ids.get(i), props.get(i))) {
+                // 十字花草没有体积，只有斜棱（下面按格铺进 crossEdges）
+                cross[i] = true;
+                shapes[i] = BlockShapes.NONE;
+            } else {
+                shapes[i] = BlockShapes.of(ids.get(i), props.get(i));
+            }
         }
 
         // 先数格子各挂几个盒子，做前缀和，再一遍填进去（避免用 List 装箱）
         int[] start = new int[cells + 1];
+        int crossCells = 0;
         for (int i = 0; i < cells; i++) {
             int pal = schematic.cells[i];
             start[i + 1] = start[i] + (pal < 0 ? 0 : shapes[pal].length / 6);
+            if (pal >= 0 && cross[pal]) crossCells++;
         }
         int total = start[cells];
+        float[] unit = BlockShapes.crossLines();
+        crossEdges = new float[crossCells * unit.length];
         // 按格子顺序填：盒子下标正好就是 cellStart[cell]..cellStart[cell+1]，
         // 所以格级索引就是这组前缀和本身，不用再存一份映射表
         float[] boxData = new float[total * 6];
@@ -94,6 +114,19 @@ public final class SchematicBoxes {
                 for (int x = 0; x < sizeX; x++) {
                     int pal = schematic.cells[row + x];
                     if (pal < 0) continue;
+                    if (cross[pal]) {
+                        for (int k = 0; k < unit.length; k += 6) {
+                            int b = crossEdgeCount * 6;
+                            crossEdges[b] = x + unit[k];
+                            crossEdges[b + 1] = y + unit[k + 1];
+                            crossEdges[b + 2] = z + unit[k + 2];
+                            crossEdges[b + 3] = x + unit[k + 3];
+                            crossEdges[b + 4] = y + unit[k + 4];
+                            crossEdges[b + 5] = z + unit[k + 5];
+                            crossEdgeCount++;
+                        }
+                        continue;
+                    }
                     float[] shape = shapes[pal];
                     for (int k = 0; k < shape.length; k += 6) {
                         int b = at * 6;
@@ -126,6 +159,16 @@ public final class SchematicBoxes {
     /** 盒子数（日志用）。 */
     public int boxCount() {
         return count;
+    }
+
+    /** 十字花草的斜棱（局部坐标，每段 6 个 float）；结构里没有花草时长度 0。 */
+    public float[] extraEdges() {
+        return crossEdges;
+    }
+
+    /** 十字花草斜棱的条数。 */
+    public int extraEdgeCount() {
+        return crossEdgeCount;
     }
 
     // ── 棱提取 ──────────────────────────────────────────────────────────

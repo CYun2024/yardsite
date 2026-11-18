@@ -43,7 +43,7 @@
 
 - 支持 `.litematic`、`.nbt`、`.schem` 格式，无需安装投影类 mod。
 - `structure.file` 留空时，自动使用 `config/yardsite/structures/` 中第一个可读取的文件。
-- 几何按方块烘焙模型生成，栅栏、墙、玻璃板、楼梯等连接状态由文件中的方块状态决定；颜色按方块贴图采样。
+- 落成线框的几何优先取方块自身的形状，形状不可用时按客户端烘焙模型推算；栅栏、墙、玻璃板、楼梯等连接状态由文件中的方块状态决定。表面阶段的颜色按方块贴图采样。
 - 落成前可整平占地范围（`structure.flatten`）；出生点取结构内可站立且靠近门的方块。
 - 旋转、镜像与偏移同时作用于占地范围、出生点、落成动画和实际方块。
 - 选区地图中按 T 顺时针旋转 90°，按 M 切换镜像；该调整仅对本次创建世界生效，不写入配置文件。
@@ -61,8 +61,8 @@
 
 | 文件 | 适用 |
 |---|---|
-| `yardsite-0.2.1+1.21.1-neoforge.jar` | Minecraft 1.21.1 · NeoForge 21.1.x · Java 21 |
-| `yardsite-0.2.1+1.20.1-forge.jar` | Minecraft 1.20.1 · Forge 47.x · Java 17 |
+| `yardsite-0.2.2+1.21.1-neoforge.jar` | Minecraft 1.21.1 · NeoForge 21.1.x · Java 21 |
+| `yardsite-0.2.2+1.20.1-forge.jar` | Minecraft 1.20.1 · Forge 47.x · Java 17 |
 
 放进 `mods/` 即可，无必需前置。版本变更见 [CHANGELOG.md](CHANGELOG.md)。
 

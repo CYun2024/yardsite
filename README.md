@@ -43,7 +43,7 @@ Enable `structure.enabled` to display the structure footprint on the selection m
 
 - Supported formats: `.litematic`, `.nbt`, `.schem`. No projection mod is required.
 - When `structure.file` is empty, the first readable file in `config/yardsite/structures/` is used.
-- Geometry is generated from baked block models. Connection states for fences, walls, glass panes and stairs are taken from the block states in the file; colors are sampled from block textures.
+- Wireframe geometry uses each block's own shape where available and falls back to the client baked model otherwise. Connection states for fences, walls, glass panes and stairs are taken from the block states in the file; surface colors are sampled from block textures.
 - The footprint can be flattened before placement (`structure.flatten`); the spawn point is a standable block inside the structure, near a door.
 - Rotation, mirror and offset apply to the footprint, spawn point, reveal animation and the actual blocks.
 - In the selection map, press T to rotate 90° clockwise and M to cycle the mirror mode. These changes apply only to the current world creation and are not written to the configuration.
@@ -61,8 +61,8 @@ Each jar targets exactly one "Minecraft version + loader" pair, and the file nam
 
 | File | For |
 |---|---|
-| `yardsite-0.2.1+1.21.1-neoforge.jar` | Minecraft 1.21.1 · NeoForge 21.1.x · Java 21 |
-| `yardsite-0.2.1+1.20.1-forge.jar` | Minecraft 1.20.1 · Forge 47.x · Java 17 |
+| `yardsite-0.2.2+1.21.1-neoforge.jar` | Minecraft 1.21.1 · NeoForge 21.1.x · Java 21 |
+| `yardsite-0.2.2+1.20.1-forge.jar` | Minecraft 1.20.1 · Forge 47.x · Java 17 |
 
 Drop it into `mods/`. No required dependencies. See [CHANGELOG.md](CHANGELOG.md) for what changed.
 

@@ -6,6 +6,8 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.RandomState;
 
+import dev.yard.site.schematic.BlockShapes;
+
 import java.nio.file.Path;
 
 /**
@@ -18,6 +20,9 @@ public final class Platform {
 
     public interface Backend {
         boolean isModLoaded(String modid);
+
+        /** 是不是客户端：线框几何在客户端可以借模型数据兜底。 */
+        boolean isClient();
 
         Path configDir();
 
@@ -41,10 +46,16 @@ public final class Platform {
 
     public static void install(Backend implementation) {
         backend = implementation;
+        // 线框几何优先问方块自己的 getShape（mod 方块一起兼容）；离线工具不装，走手写表
+        BlockShapes.setSource(McShapes.INSTANCE);
     }
 
     public static boolean isModLoaded(String modid) {
         return get().isModLoaded(modid);
+    }
+
+    public static boolean isClient() {
+        return get().isClient();
     }
 
     public static Path configDir() {

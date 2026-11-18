@@ -16,17 +16,33 @@ import java.util.Set;
  * <p>所以几何要细到盒子：楼梯 = 底下半格 + 上面半格的一块，活板门 = 3/16 格厚的板，
  * 玻璃板 = 中间的薄片。线框按盒子的棱出，遮挡按盒子求交，两边用的是同一份几何。
  *
- * <h2>为什么是表，不是去解析资源包</h2>
- * 真正准确的做法当然是读 {@code assets/.../blockstates} + {@code models}` 里的 JSON，
- * 但那是给游戏自己用的渲染管线：多层 cuboid、旋转、UV 锁定、multipart 条件……搬过来要写上千行，
- * 而且每次加载建筑都得解一遍 JSON。这里只覆盖原版里<b>形状不是满格</b>的那几十类方块
- * （半砖、楼梯、活板门、门、栅栏、墙、板、地毯、按钮、牌子、灯笼……），够把一栋房子画对；
- * 剩下的一律当满格——反正绝大多数方块本来就是满格。
+ * <h2>两个来源</h2>
+ * <ol>
+ *   <li><b>游戏里：</b>平台层通过 {@link #setSource(ShapeSource)} 装一个 Minecraft 实现，
+ *       直接问 {@code BlockState#getShape(...)}。它对<b>任何已注册方块</b>都成立（包括 mod 的
+ *       楼梯/半砖/栅栏/墙/板），状态属性也由方块自己解释，不用逐类写规则。</li>
+ *   <li><b>离线/兜底：</b>本类的手写表。{@code tools/schematic-check} 脱离游戏跑、
+ *       或者 {@code getShape} 没给出可用形状（空形状的贴片、方块没注册）时用它。</li>
+ * </ol>
+ * 之所以保留手写表而不是去解析资源包：{@code blockstates}/{@code models} 是游戏渲染管线的
+ * 输入（旋转、UV 锁定、multipart……），搬过来要写上千行；而 {@code getShape} 就是方块自己
+ * 报给游戏的形状，已经包含这些结果。表只覆盖"形状不是满格"的常见几类，够离线自检和兜底。
  *
  * <p>坐标约定和 Minecraft 一致：x 向东、y 向上、z 向南，{@code facing=north} 指 -z。
- * 纯 Java，不 import 任何 Minecraft 类，{@code tools/schematic-check} 能直接喂投影文件验。
+ * 纯 Java，不 import 任何 Minecraft 类；{@code tools/schematic-check} 能直接喂投影文件验。
  */
 public final class BlockShapes {
+
+    /**
+     * 外部几何来源。游戏里由平台层装成 {@code BlockState#getShape}；离线工具不装，走手写表。
+     */
+    public interface ShapeSource {
+        /**
+         * @return 每盒 6 个 float（x0,y0,z0,x1,y1,z1，局部 0..1 坐标）；
+         *         {@code null} = 不认识/形状不可用，交回手写表
+         */
+        float[] boxes(String id, Map<String, String> props);
+    }
 
     /** 满格立方体。 */
     public static final float[] FULL = {0F, 0F, 0F, 1F, 1F, 1F};
@@ -45,7 +61,17 @@ public final class BlockShapes {
     /** 缓存：同一份结构里同一个状态会出现几千次，形状只算一次。 */
     private static final Map<String, float[]> CACHE = new HashMap<>(256);
 
+    private static volatile ShapeSource source;
+
     private BlockShapes() {
+    }
+
+    /** 装/换几何来源。已经算过的形状作废（换来源前可能缓存了旧来源的结果）。 */
+    public static void setSource(ShapeSource implementation) {
+        synchronized (CACHE) {
+            CACHE.clear();
+            source = implementation;
+        }
     }
 
     /**
@@ -60,7 +86,7 @@ public final class BlockShapes {
             float[] cached = CACHE.get(key);
             if (cached != null) return cached;
         }
-        float[] shape = compute(path(id), props == null ? Map.of() : props);
+        float[] shape = compute(id, path(id), props == null ? Map.of() : props);
         synchronized (CACHE) {
             CACHE.put(key, shape);
         }
@@ -83,11 +109,22 @@ public final class BlockShapes {
 
     // ── 分派 ────────────────────────────────────────────────────────────
 
-    private static float[] compute(String p, Map<String, String> props) {
+    private static float[] compute(String id, String p, Map<String, String> props) {
+        // 十字花草没有体积：不产生盒子（不挡视线），线由 SchematicBoxes 单独加进来（见 crossLines）
+        if (isCrossPlant(p)) return NONE;
         if (isFlatModel(p)) return NONE;
-        // 花也要占一小块体积：落成动画改成画面之后，一片"什么都没有"的空地是看不下去的
-        // （很多小建筑就是把花盆、花草摆在屋外当装饰的）。尺寸照抄原版的 SHAPE = box(5,0,5,11,10,11)。
-        if (!p.startsWith("potted_") && (FLOWER.contains(p) || p.endsWith("_tulip"))) return flower();
+        // 花盆：盆 + 盆里那棵，比 getShape（只到盆沿）看着更像一盆花
+        if (p.equals("flower_pot") || p.startsWith("potted_")) return potted();
+
+        ShapeSource live = source;
+        if (live != null) {
+            try {
+                float[] boxes = live.boxes(id, props);
+                if (boxes != null) return boxes;
+            } catch (RuntimeException | LinkageError broken) {
+                // 这个方块自己的形状抛了：退回手写表，别让整份结构读不出来
+            }
+        }
 
         if (p.endsWith("_slab")) return slab(props);
         if (p.endsWith("_stairs")) return stairs(props);
@@ -118,13 +155,6 @@ public final class BlockShapes {
         if (p.equals("hopper")) return concat(box(0.25F, 0F, 0.25F, 0.75F, 0.625F, 0.75F),
                 box(0F, 0.625F, 0F, 1F, 1F, 1F));
         if (p.equals("campfire") || p.equals("soul_campfire")) return box(0F, 0F, 0F, 1F, 0.4375F, 1F);
-        if (p.equals("flower_pot") || p.startsWith("potted_")) {
-            // 盆：底下 6/16 见方、上面一圈口沿；盆里那棵给一小簇（原来这行永远走不到 ——
-            // isFlatModel 先把 potted_* 判成平面模型了，于是所有花盆都算空气）
-            return concat(box(0.3125F, 0F, 0.3125F, 0.6875F, 0.375F, 0.6875F),
-                    box(0.25F, 0.375F, 0.25F, 0.75F, 0.4375F, 0.75F),
-                    box(0.34375F, 0.4375F, 0.34375F, 0.65625F, 0.6875F, 0.65625F));
-        }
         if (p.endsWith("_bed")) return box(0F, 0F, 0F, 1F, 0.5625F, 1F);
         if (p.endsWith("_anvil")) return box(0.125F, 0F, 0.125F, 0.875F, 1F, 0.875F);
         if (p.equals("cauldron")) return concat(box(0F, 0F, 0F, 1F, 0.3125F, 1F),
@@ -159,12 +189,50 @@ public final class BlockShapes {
                 || p.endsWith("_sprouts") || p.endsWith("_vines") || p.equals("vine");
     }
 
-    /** 单格花（原版 SHAPE 约 6/16 见方、10/16 高）。 */
-    private static float[] flower() {
-        return box(0.3125F, 0F, 0.3125F, 0.6875F, 0.625F, 0.6875F);
+    /**
+     * 十字花草的线（局部 0..1）：两块对角平面各画成一个矩形，共 8 条斜棱。
+     *
+     * <p>它们是<b>线</b>不是盒子：花草没有可遮挡的体积，走盒子会把一朵花画成整格外框。
+     * 两块平面沿对角线交叉，从上方看就是斜的 X（原版 cross 模型的角度）。
+     */
+    public static float[] crossLines() {
+        return CROSS_LINES.clone();
     }
 
-    /** 有"一朵花"的花：整格跳过会让屋外的装饰整片消失，给一小簇就够看了。 */
+    private static final float[] CROSS_LINES = {
+            // 面 A：从西北角到东南角的对角平面
+            0.05F, 0F, 0.05F, 0.95F, 0F, 0.95F,
+            0.95F, 0F, 0.95F, 0.95F, 1F, 0.95F,
+            0.95F, 1F, 0.95F, 0.05F, 1F, 0.05F,
+            0.05F, 1F, 0.05F, 0.05F, 0F, 0.05F,
+            // 面 B：从东北角到西南角
+            0.05F, 0F, 0.95F, 0.95F, 0F, 0.05F,
+            0.95F, 0F, 0.05F, 0.95F, 1F, 0.05F,
+            0.95F, 1F, 0.05F, 0.05F, 1F, 0.95F,
+            0.05F, 1F, 0.95F, 0.05F, 0F, 0.95F
+    };
+
+    /** 十字模型的花草：花、草、蕨、枯木、树苗。名字要同时覆盖 1.20.1（grass）和 1.21（short_grass）。 */
+    public static boolean isCrossPlant(String id, Map<String, String> props) {
+        return isCrossPlant(path(id));
+    }
+
+    private static boolean isCrossPlant(String p) {
+        if (p.startsWith("potted_")) return false;
+        return FLOWER.contains(p) || p.endsWith("_tulip") || p.endsWith("_sapling") || GRASSY.contains(p);
+    }
+
+    private static final Set<String> GRASSY = Set.of(
+            "grass", "short_grass", "fern", "large_fern", "dead_bush", "tall_grass");
+
+    /** 花盆：盆底 + 口沿 + 盆里的一小簇。 */
+    private static float[] potted() {
+        return concat(box(0.3125F, 0F, 0.3125F, 0.6875F, 0.375F, 0.6875F),
+                box(0.25F, 0.375F, 0.25F, 0.75F, 0.4375F, 0.75F),
+                box(0.34375F, 0.4375F, 0.34375F, 0.65625F, 0.6875F, 0.65625F));
+    }
+
+    /** 单格/双格花：给交叉薄板，线框里能看出是棵花，而不是整格方块。 */
     private static final Set<String> FLOWER = Set.of(
             "dandelion", "poppy", "blue_orchid", "allium", "azure_bluet", "oxeye_daisy",
             "cornflower", "lily_of_the_valley", "wither_rose", "torchflower",
@@ -189,19 +257,20 @@ public final class BlockShapes {
     }
 
     /**
-     * 楼梯：底下一层半格 + 上面半格落在 <b>facing 那一侧</b>的一块。
+     * 楼梯：底下一层半格 + 上半级。上半级按 {@code shape} 分三种：
+     * <ul>
+     *   <li>{@code straight}：正对 facing 那一侧整半边；</li>
+     *   <li>{@code inner_*}：直梯的整半边 + <b>低侧</b>一个 1/4 角（两级相接的内拐角）；</li>
+     *   <li>{@code outer_*}：只有<b>高侧</b>一个 1/4 角（外拐角，比直梯还窄）。</li>
+     * </ul>
      *
-     * <p><b>朝向是这张表里唯一一处"照抄原版才算对"的地方，以前整表反了 180°。</b>
-     * 依据是客户端 jar 里的 {@code blockstates/*_stairs.json} + {@code models/block/stairs.json}：
-     * 模型的上半级在 <b>x 8..16</b>，而 {@code facing=east} 不带任何旋转（{@code y=0}），
-     * {@code facing=north} 是 {@code y=270}（把 +X 转到 -Z），于是 north 的上半级在 <b>z 0..8</b>。
-     * 换成 {@code StairBlock} 的形状常量也是同一个结论（{@code NORTH_SHAPE} 的上半块是 z 0..8）。
+     * <p>象限照抄原版 {@code StairBlock} 的 shape 表（{@code SHAPE_BY_STATE}），不是从模型文件猜的：
+     * facing 与 2D 数据值、shape 序数组合出来的下标，再对上八分体
+     * {@code OCTET_NPN/NPP/PNN/PPP}。例如 facing=east 的 straight 是东半边、
+     * inner_left 多出西北角、outer_right 只剩东南角。
      *
-     * <p>上一版按"facing 指向低的那一头"写的，四个方向全反 —— 樱花小屋里 158 级樱花楼梯
-     * 于是朝反方向倒，看起来就是"东南和西北的楼梯反了"。
-     *
-     * <p>{@code shape=inner/outer_*} 会再多半块，这里按 straight 处理——差的那半块在整栋楼的尺度上
-     * 看不出来，而多写四种分支只会让表更难维护。
+     * <p>朝向本身照客户端模型：{@code stairs.json} 的上半级在 x 8..16，
+     * {@code facing=east} 不带旋转；{@code facing=north} 的上半级在 z 0..8。
      */
     private static float[] stairs(Map<String, String> props) {
         boolean top = "top".equals(val(props, "half", "bottom"));
@@ -210,13 +279,44 @@ public final class BlockShapes {
         float stepLow = top ? 0F : 0.5F;
         float stepHigh = top ? 0.5F : 1F;
         float[] base = box(0F, baseLow, 0F, 1F, baseHigh, 1F);
-        float[] step = switch (val(props, "facing", "north")) {
+
+        String facing = val(props, "facing", "north");
+        float[] straight = switch (facing) {
             case "north" -> box(0F, stepLow, 0F, 1F, stepHigh, 0.5F);
             case "south" -> box(0F, stepLow, 0.5F, 1F, stepHigh, 1F);
             case "west" -> box(0F, stepLow, 0F, 0.5F, stepHigh, 1F);
             default -> box(0.5F, stepLow, 0F, 1F, stepHigh, 1F);
         };
-        return concat(base, step);
+
+        String shape = val(props, "shape", "straight");
+        boolean inner = shape.startsWith("inner");
+        boolean outer = shape.startsWith("outer");
+        if (!inner && !outer) return concat(base, straight);
+
+        boolean left = shape.endsWith("_left");
+        float[] corner = stairCorner(facing, inner, left, stepLow, stepHigh);
+        return inner ? concat(base, straight, corner) : concat(base, corner);
+    }
+
+    /**
+     * 楼梯内/外拐角那一个 1/4 块。{@code inner} 在低侧、{@code outer} 在高侧，具体象限见
+     * {@link #stairs(Map)} 的说明。
+     */
+    private static float[] stairCorner(String facing, boolean inner, boolean left,
+                                       float low, float high) {
+        // 象限：0=西北 1=东北 2=西南 3=东南
+        int quadrant = switch (facing) {
+            case "east" -> inner ? (left ? 0 : 2) : (left ? 1 : 3);
+            case "west" -> inner ? (left ? 3 : 1) : (left ? 2 : 0);
+            case "south" -> inner ? (left ? 1 : 0) : (left ? 3 : 2);
+            default -> inner ? (left ? 2 : 3) : (left ? 0 : 1);   // north
+        };
+        return switch (quadrant) {
+            case 0 -> box(0F, low, 0F, 0.5F, high, 0.5F);
+            case 1 -> box(0.5F, low, 0F, 1F, high, 0.5F);
+            case 2 -> box(0F, low, 0.5F, 0.5F, high, 1F);
+            default -> box(0.5F, low, 0.5F, 1F, high, 1F);
+        };
     }
 
     /** 活板门：关着是 3/16 厚的平放板，开着是贴着 facing 那面竖起的一块。 */
