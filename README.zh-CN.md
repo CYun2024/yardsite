@@ -104,11 +104,19 @@
 
 ## 构建
 
+仓库根只是容器，**每个版本外壳是独立的构建**，用根 wrapper 加 `-p` 指定：
+
 ```bash
-./gradlew build                    # 1.21.1 NeoForge → build/libs/
-./gradlew -p forge-1.20.1 build    # 1.20.1 Forge     → dist/
-./gradlew runClient                # 开发客户端
+./gradlew -p neoforge-1.21.1 build     # 1.21.1 NeoForge → dist/
+./gradlew -p forge-1.20.1    build     # 1.20.1 Forge     → dist/
+./gradlew -p neoforge-1.21.1 runClient # 开发客户端
 ```
+
+目录：
+
+- `common/` —— 加载器与版本无关的共享核心（唯一一份源码）
+- `neoforge-1.21.1/`、`forge-1.20.1/` —— 版本外壳：平台实现、加载器资源、构建脚本
+- `libs/` —— 仅编译期使用的第三方 jar（Sodium），不进版本库
 
 Sodium 仅用于编译期可选剔除钩子；将对应 Sodium jar 放入 `libs/` 可启用，缺失时构建仍可通过。
 
@@ -116,11 +124,11 @@ Sodium 仅用于编译期可选剔除钩子；将对应 Sodium jar 放入 `libs/
 
 `forge-1.20.1/` 是**独立的 Gradle 构建**（ForgeGradle 6 + MixinGradle），但它不复制核心代码，而是共用同一份源码：
 
-1. `generateForgeSources` 把 `src/main/java` 复制到 `forge-1.20.1/build/generated/forge-src`；
+1. `generateForgeSources` 把 `common/src/main/java` 复制到 `forge-1.20.1/build/generated/forge-src`；
 2. `forge-1.20.1/build.gradle` 里一张精确字符串替换表把 1.20.1 与 1.21.1 的 API 差异改掉；
 3. 替换后的源码和 `forge-1.20.1/src/main/java/dev/yard/site/platform/forge` 里的 Forge 平台实现一起编译。
 
-所以**核心代码仍然只有一份**：在这里改一次，两个 jar 都会生效。只动 `forge-1.20.1/` 的改动（mods.toml、mixin、平台类、替换表）不影响 NeoForge 那一版。产物落在仓库根的 `dist/`，不进版本库。
+所以**核心代码仍然只有一份**：在 `common/` 里改一次，两个 jar 都会生效。只动某个外壳目录的改动（mods.toml、mixin、平台类、替换表）不影响别的 jar。产物落在 `dist/`，不进版本库。
 
 
 ## 开发说明

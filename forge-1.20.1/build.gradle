@@ -6,8 +6,20 @@ plugins {
 def minecraft_version = project.property('minecraft_version')
 def forge_version = project.property('forge_version')
 def mixin_version = project.property('mixin_version')
-def mod_version = project.property('mod_version')
-def mod_group = project.property('mod_group')
+
+// 版本号唯一来源：仓库根的 ../versions.properties（本外壳的 gradle.properties 里不再写一份）。
+// 读不到直接失败，绝不静默回退 —— 否则会产出一个版本号错误、但看起来正常的 jar。
+def versionsFile = file('../versions.properties')
+if (!versionsFile.isFile()) {
+    throw new GradleException("找不到 ${versionsFile} —— mod_version / mod_group 必须来自仓库根的 versions.properties")
+}
+def sharedVersions = new Properties()
+versionsFile.withInputStream { sharedVersions.load(it) }
+def mod_version = sharedVersions.getProperty('mod_version')
+def mod_group = sharedVersions.getProperty('mod_group')
+if (mod_version == null || mod_group == null) {
+    throw new GradleException("${versionsFile} 缺 mod_version 或 mod_group")
+}
 
 group = mod_group
 version = "${mod_version}+${minecraft_version}-forge"
@@ -57,11 +69,11 @@ repositories {
 }
 
 // 1.20.1 的少量方法签名/API 与 1.21.1 不同。共享源码先复制到 build 目录做定点替换，
-// 再和本工程的 Forge 平台代码一起编译；仓库里仍然只有上一级 src/main/java 一份源码
-// （本工程嵌在核心工程目录里，monorepo 与独立仓库两种布局下 ../src/main/java 都成立）。
+// 再和本工程的 Forge 平台代码一起编译；仓库里仍然只有上一级 common/src/main/java 一份源码
+// （本工程嵌在 site 仓库里，monorepo 与独立仓库两种布局下 ../common/src/main/java 都成立）。
 def generatedForgeSources = layout.buildDirectory.dir('generated/forge-src')
 def generateForgeSources = tasks.register('generateForgeSources', Sync) {
-    from('../src/main/java') {
+    from('../common/src/main/java') {
         // 1.21.1 NeoForge 平台实现、Sodium mixin、以及 1.20.1 有专门替代的 mixin 不进来
         exclude 'dev/yard/site/platform/neoforge/**'
         exclude 'dev/yard/site/mixin/sodium/**'
@@ -112,12 +124,9 @@ sourceSets {
             srcDir 'src/main/java'
         }
         resources {
-            srcDir '../src/main/resources'
-            exclude 'META-INF/neoforge.mods.toml'
-            // 共享目录里的 1.21.1 配置不要；本工程用的是 yardsite.forge.core.mixins.json
-            exclude 'yardsite.mixins.json'
-            exclude 'yardsite.sodium.mixins.json'
-
+            // 共享资源只剩 assets/ 和 icon.png（mods.toml / pack.mcmeta / *mixins.json 各归外壳），
+            // 所以这里不再需要 exclude 别家的加载器资源。
+            srcDir '../common/src/main/resources'
             srcDir 'src/main/resources'
         }
     }

@@ -104,11 +104,19 @@ Biome color adjustments are stored in `config/yardsite/site_biome_colors.json`.
 
 ## Building
 
+The repository root is only a container. **Each version shell is its own Gradle build** — point the shared wrapper at it with `-p`:
+
 ```bash
-./gradlew build                    # 1.21.1 NeoForge → build/libs/
-./gradlew -p forge-1.20.1 build    # 1.20.1 Forge     → dist/
-./gradlew runClient                # development client
+./gradlew -p neoforge-1.21.1 build     # 1.21.1 NeoForge → dist/
+./gradlew -p forge-1.20.1    build     # 1.20.1 Forge     → dist/
+./gradlew -p neoforge-1.21.1 runClient # development client
 ```
+
+Layout:
+
+- `common/` — loader- and version-agnostic shared core (the only copy of the source)
+- `neoforge-1.21.1/`, `forge-1.20.1/` — version shells: platform implementation, loader resources, build scripts
+- `libs/` — compile-time-only third-party jars (Sodium); not committed
 
 Sodium is used only for optional compile-time culling hooks. Place the corresponding Sodium jar in `libs/` to enable them; the build succeeds without it.
 
@@ -116,11 +124,11 @@ Sodium is used only for optional compile-time culling hooks. Place the correspon
 
 `forge-1.20.1/` is a **separate Gradle build** (ForgeGradle 6 + MixinGradle) that shares the same core sources rather than duplicating them:
 
-1. `generateForgeSources` copies `src/main/java` into `forge-1.20.1/build/generated/forge-src`;
+1. `generateForgeSources` copies `common/src/main/java` into `forge-1.20.1/build/generated/forge-src`;
 2. a short table of exact string replacements (in `forge-1.20.1/build.gradle`) adapts the 1.20.1 API differences;
 3. the result is compiled together with the Forge platform classes in `forge-1.20.1/src/main/java/dev/yard/site/platform/forge`.
 
-So **there is still only one copy of the core code**: fix it here, and both jars pick it up. Changes that only touch `forge-1.20.1/` (mods.toml, mixins, platform classes, replacements) do not affect the NeoForge build. The jar lands in `dist/` at the repository root and is not committed.
+So **there is still only one copy of the core code**: edit `common/` once, and both jars pick it up. Changes that only touch one shell directory (mods.toml, mixins, platform classes, replacements) do not affect the other jars. The jar lands in `dist/` and is not committed.
 
 
 ## Development notes
