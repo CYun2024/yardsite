@@ -38,15 +38,14 @@ import net.minecraft.world.phys.Vec3;
  * 所以动画段用长焦（视野最多 {@code AERIAL_FOV}，玩家设得更宽就按上限走，落机时才展开回去）：窄视野
  * 下同样的俯角盖得住的距离远得多，镜头就不用为了盖住画面而俯到接近顶视。
  *
- * <h2>登录后：那块地皮的<b>真实网格真的进了绘制列表</b>，柱子才让位</h2>
+ * <h2>登录后：那块地皮的数据到货、网格编译好，柱子才让位</h2>
  * <ul>
  *   <li>让位顺序<b>从庭院开始向外扩</b>：谁先开始淡由离院子中心的远近排。但顺序只是<b>最早</b>时刻，
- *       不是放行时刻——放行要等这一块的真实区块进了 Sodium 的绘制列表（{@code ChunkRenderListMixin}
- *       每帧迭代到的 section 就是「这一刻真的在提交绘制」的那一块），所以不会出现"柱子化了、底下还是空的"。</li>
- *   <li>等不到网格的那几块各有上限：<b>区块数据永远到不了</b>（超出客户端视距）和<b>数据到了但网格没进列表</b>
- *       （在相机背面/视距边缘）都在各自的上限到点时按自己的排时刻走。这两条是为了<b>收尾不再整片抹</b>：
- *       以前视距外那几百块一直吊着，等让位时间用满就被降落那一下整体淡掉，看着就是"唰地一起消失、间隔没了"。</li>
- *       没装 Sodium（这组 mixin 自动不生效）时只按"区块到货 + 一点余量"放行，退化成遮罩。</li>
+ *       不是放行时刻——放行还要等这一块的区块数据到货，再留一段网格编译的余量，
+ *       所以不会出现"柱子化了、底下还是空的"。</li>
+ *   <li>等不到数据的块也有上限：<b>区块数据永远到不了</b>（超出客户端视距）的，到点按自己的排时刻走。
+ *       这条是为了<b>收尾不再整片抹</b>：以前视距外那几百块一直吊着，等让位时间用满就被降落那一下
+ *       整体淡掉，看着就是"唰地一起消失、间隔没了"。</li>
  *   <li>每一块都是<b>原地</b>淡掉：整块一起、不逐格错峰，镜头这一段又是定住的，所以既不会"一片柱子飘着化"，
  *       也不会"从某条边推到另一边"。淡出用 1.6 秒的五次曲线，开始化和淡完两头都缓。</li>
  *   <li>柱顶<b>一动不动</b>：从头到尾都用预读到的那一份地面高度，淡出期间不再滑到真实地表高度。
@@ -70,19 +69,13 @@ final class SiteRevealWorldRenderer {
     static final int FADE_MS = 1600;
     /** 一整块地形完全消散需要的时长（现在就地淡，不逐格错峰，所以就是一个淡出时长）。 */
     private static final int REVEAL_TAIL_MS = FADE_MS;
-    /** 真实网格进了绘制列表后再多等这么久才开始淡（毫秒）：给这一帧的上传留出落地时间。 */
-    private static final long MESH_SETTLE_MS = 120L;
     /**
-     * 没挂上 Sodium 网格判据时，区块到货后给网格编译留的余量（毫秒）。
-     * 这种模式下柱子本来就是唯一遮罩（真实 section 照常画在遮罩下面），只能按时间估。
+     * 区块到货后给网格编译留的余量（毫秒）。柱子在的时候真实 section 照常画在遮罩下面，
+     * 所以下面那块地的网格有没有上传好只能按时间估；估短了就是"柱子淡完了底下还是空的"。
      */
-    private static final long NO_FILTER_MESH_MS = 1_200L;
-    /** 区块数据到了，但这么久还没进绘制列表（相机背面、视距边缘）：按这块的排时刻放行。 */
-    private static final long MESH_MISS_MS = 2_500L;
+    private static final long MESH_COMPILE_MS = 1_200L;
     /** 这么久区块数据都没到（超出客户端视距，永远到不了）：按这块的排时刻放行，别吊着。 */
     private static final long DATA_MISS_MS = 2_500L;
-    /** 登录后探测这么久，一次都没收到绘制列表回报 ⇒ 认定 Sodium 过滤没生效。 */
-    private static final long FILTER_PROBE_MS = 1_500L;
     /** 登录后先等不透明底淡掉，再开始让柱子让位（毫秒）。 */
     private static final long REVEAL_DELAY_MS = 900L;
     /**
@@ -287,8 +280,6 @@ final class SiteRevealWorldRenderer {
     private final int chunkCols;
     private final int chunkRows;
     private final long[] dataAt;
-    /** 真实区块第一次在 Sodium 绘制列表里出现的时刻（+1，0 = 还没出现）——淡出的前置条件。 */
-    private final long[] drawnAt;
     /** 每一块地形定下来的淡出开始时刻（-1 = 还没定，还在等网格/到货）。 */
     private final long[] fadeAt;
     /** 每一块地形按离庭院中心的远近排出来的<b>最早</b>让位时刻（毫秒，相对动画时钟）。 */
@@ -322,15 +313,9 @@ final class SiteRevealWorldRenderer {
     private int waiting;
     /** 已经定下来的淡出时刻里最晚的那一个（收尾要等它淡完）。 */
     private long maxFadeStart;
-    /** 绘制列表回报次数（>0 = Sodium 那组 mixin 真的挂上了）。 */
-    private int sightings;
     /** 淡出放行方式各用了多少块（诊断用）。 */
-    private int provenByMesh;
     private int provenByData;
     private int provenByMiss;
-    /** 两种模式的判定结果各只打一次日志。 */
-    private boolean meshGateAnnounced;
-    private boolean noFilterAnnounced;
 
     /** 基准机位（相机接管 / 落机插值用），每帧由 tick 重算。 */
     private Vec3 eye = Vec3.ZERO;
@@ -427,7 +412,6 @@ final class SiteRevealWorldRenderer {
         this.chunkRows = Math.floorDiv(maxBlockZ, 16) - chunkBaseZ + 1;
         this.total = chunkCols * chunkRows;
         this.dataAt = new long[total];
-        this.drawnAt = new long[total];
         this.waveAt = new long[total];
         this.fadeAt = new long[total];
         java.util.Arrays.fill(fadeAt, -1L);
@@ -700,15 +684,6 @@ final class SiteRevealWorldRenderer {
             revealClockMs += Math.min(MAX_FRAME_MS, Math.max(0L, now - lastRevealTickAt));
             lastRevealTickAt = now;
         }
-        if (!meshGateAnnounced && sightings > 0) {
-            meshGateAnnounced = true;
-            YardSiteLog.debug("落成让位判据：真实区块进了 Sodium 绘制列表才淡柱子");
-        }
-        if (!noFilterAnnounced && sightings == 0 && revealClockMs > FILTER_PROBE_MS) {
-            noFilterAnnounced = true;
-            YardSiteLog.debug("落成让位判据：没收到绘制列表回报（Sodium 过滤没挂上？），"
-                    + "退回「区块到货 + " + NO_FILTER_MESH_MS + " ms」放行");
-        }
 
         int done = 0;
         int pending = 0;
@@ -745,8 +720,8 @@ final class SiteRevealWorldRenderer {
     /**
      * 这一块现在能不能定下淡出时刻（-1 = 还不能，继续盖着）。
      *
-     * <p>放行要同时满足两件事：轮到它了（{@code waveAt}，从庭院向外排）和它身下那块真实地形<b>真的在画</b>。
-     * 后者靠 Sodium 绘制列表的回报；数据或网格迟迟不来的（视距外、相机背面）到自己的上限就按排时刻走——
+     * <p>放行要同时满足两件事：轮到它了（{@code waveAt}，从庭院向外排）和它身下那块真实地形
+     * <b>已经有数据、且留够了网格编译的时间</b>。数据迟迟不来的（视距外）到自己的上限就按排时刻走——
      * 不然它们会一直吊着，最后被降落那一下整体淡掉，看着就是"柱子唰地一起消失"。
      */
     private long fadeStartNow(int index) {
@@ -757,51 +732,8 @@ final class SiteRevealWorldRenderer {
             provenByMiss++;
             return revealClockMs;   // 视距外：区块永远不来，到点就让它跟着自己的排时刻淡
         }
-        long drawn = drawnAt[index];
-        if (drawn != 0L) {
-            provenByMesh++;
-            return Math.max(wave, drawn - 1L + MESH_SETTLE_MS);
-        }
-        if (sightings > 0 || revealClockMs <= FILTER_PROBE_MS) {
-            // 判据是活的：这一块还没进绘制列表，可能是相机背面，也可能是网格还没上传
-            if (revealClockMs < data - 1L + MESH_MISS_MS) return -1L;
-            provenByMiss++;
-            return revealClockMs;
-        }
         provenByData++;
-        return Math.max(wave, data - 1L + NO_FILTER_MESH_MS);
-    }
-
-    /**
-     * Sodium 绘制列表回报：这个区块列的真实网格这一帧确实被迭代到（= 已上传、正在提交绘制）。
-     * 渲染线程调用，和 {@link #tick} 同一个线程，不需要加锁。
-     */
-    void noteSectionDrawn(int chunkX, int chunkZ) {
-        int index = chunkIndex(chunkX, chunkZ);
-        if (index < 0) return;
-        sightings++;
-        if (drawnAt[index] == 0L) drawnAt[index] = revealClockMs + 1L;
-    }
-
-    /**
-     * 某个区块为心的方形范围内，真实网格上没上屏：数的是 {@link #drawnAt}（Sodium 绘制列表的回报）。
-     *
-     * <p>只要求<b>绝大多数</b>进过列表（85%）：镜头朝向那一侧会一直在画，相机背后那几列
-     * 可能永远进不了列表，不能因为它们把人卡在天上。一次回报都没收到（没装 Sodium）时直接放行。
-     */
-    boolean gateAreaDrawn(int centerChunkX, int centerChunkZ, int radius) {
-        if (sightings <= 0) return true;
-        int known = 0;
-        int drawn = 0;
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                int index = chunkIndex(centerChunkX + dx, centerChunkZ + dz);
-                if (index < 0) continue;
-                known++;
-                if (drawnAt[index] != 0L) drawn++;
-            }
-        }
-        return known == 0 || drawn * 100 >= known * 85;
+        return Math.max(wave, data - 1L + MESH_COMPILE_MS);
     }
 
     private int chunkIndex(int chunkX, int chunkZ) {
@@ -854,20 +786,6 @@ final class SiteRevealWorldRenderer {
         return index < 0 ? -1L : fadeAt[index];
     }
 
-    /**
-     * Sodium 渲染钩子用：这个区块列的真实地形现在要不要藏起来。
-     * 只有场地圆内、且还没轮到淡出的区块列才藏；场地外沿用原本的渲染，免得多出空洞。
-     */
-    boolean isHidden(int chunkX, int chunkZ) {
-        if (chunkIndex(chunkX, chunkZ) < 0) return false;
-        double dx = chunkX * 16 + 8 - plan.plotCenterX();
-        double dz = chunkZ * 16 + 8 - plan.plotCenterZ();
-        double radius = fineHalf * (double) fineStep - 12.0;
-        if (dx * dx + dz * dz > radius * radius) return false;
-        long start = chunkStart(chunkX, chunkZ);
-        return start < 0L || revealClockMs < start;
-    }
-
     int ready() {
         return ready;
     }
@@ -882,10 +800,9 @@ final class SiteRevealWorldRenderer {
         return waitRadius;
     }
 
-    /** 淡出放行方式各用了多少块（日志用：能一眼看出这次交接走的是网格判据还是到货判据）。 */
+    /** 淡出放行方式各用了多少块（日志用：能看出多少块是按到货放行、多少块是等到上限放行）。 */
     String revealReport() {
-        return "网格 " + provenByMesh + "/到货 " + provenByData + "/到点放行 " + provenByMiss
-                + "，绘制列表回报 " + sightings + " 次";
+        return "到货 " + provenByData + "/到点放行 " + provenByMiss;
     }
 
     /**
@@ -979,7 +896,7 @@ final class SiteRevealWorldRenderer {
     }
 
     /**
-     * 服务端真实落点到了：只挪镜头终点（{@code isHidden} 的圆心、让位顺序也跟着走）。开场进度、
+     * 服务端真实落点到了：只挪镜头终点（让位顺序的圆心、{@code chunkStart} 的判据也跟着走）。开场进度、
      * 换源状态、区块到货记录都不动，所以镜头是接着往新落点偏过去，不会重新飞一遍。
      */
     void retargetPlan(SitePlan plan) {

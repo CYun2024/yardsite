@@ -18,11 +18,6 @@ logoFile="icon.png"
 [[mixins]]
 config="yardsite.mixins.json"
 
-#!sodium-mixin-begin
-[[mixins]]
-config="yardsite.sodium.mixins.json"
-#!sodium-mixin-end
-
 [[dependencies.yardsite]]
 modId="neoforge"
 type="required"

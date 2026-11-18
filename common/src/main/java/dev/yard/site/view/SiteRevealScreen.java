@@ -31,19 +31,15 @@ import java.util.UUID;
  * 原点），然后这个画面从正交一路 morph 到透视：镜头推到院子上空、FOV 拉开、地形展开成真实高度，
  * 中途格子悄悄从一格 16 方块换成一格 4 方块（两份场共用同一批区块采样，换的那帧画面不差一个像素）。
  * 玩家登录后画面交给真世界，柱子继续在 GUI 层用同一套相机画，并盖住<b>整个视野</b>。
- * 让位<b>从庭院开始向外扩</b>（排时刻按离院子中心的远近），但每一块要等<b>它身下那块真实区块真的进了
- * Sodium 的绘制列表</b>才开始淡，所以不会出现"柱子化了、底下还是空的"；每一块都是<b>原地</b>淡掉
+ * 让位<b>从庭院开始向外扩</b>（排时刻按离院子中心的远近），但每一块要等<b>它身下那块真实区块数据到货、
+ * 再留够网格编译的时间</b>才开始淡，所以不会出现"柱子化了、底下还是空的"；每一块都是<b>原地</b>淡掉
  * （柱顶不高低变化、整块一起、不逐格错峰，镜头这一段又定住），既不会"往上飘着散"也不会"从某条边推到另一边"。
- * 视距外或相机背面那些永远等不到网格的，到自己的上限就按排时刻走 —— 不这样收尾就会把几百根柱子吊到最后
+ * 视距外那些永远等不到数据的，到自己的上限就按排时刻走 —— 不这样收尾就会把几百根柱子吊到最后
  * 一起抹掉。全部放行并且最后那块淡完，才进落机。
  * 落机前先把玩家放进<b>一层走廊中段</b>（大门往里几格，脸朝屋子内；判据是那一格真的站得住，每帧重试到
  * 盖完为止），镜头再走一条四段航线：<b>空中机位 → 大门正上方（屋顶以上）→ 门廊外·门轴线上·眼高 →
  * 顺着门洞等速进屋、落到玩家眼睛</b>。竖直下降那一列落在门廊顶棚外面，穿门那段走门洞中线，
  * 所以既不刮檐口也不从门楣/墙里穿出来；时长按行程算（3.2~5.2 秒），行程不再被塞进 1.9 秒里。
- *
- * <p>装了 Sodium 时，还没轮到的区块列连真实 section 都不提交绘制（{@code ChunkRenderListMixin}），
- * 所以沙盘淡出时露出来的确实是“这一刻才出现”的真实地形，而不是一直画在遮罩下面的世界；
- * 实体和方块实体也一起过滤。没装 Sodium 时这组 mixin 自动不生效，退化为纯遮罩。
  *
  * <p>动画期间玩家（客户端 + 服务端实体）设为无敌，免得受伤红屏和镜头抖打断镜头运动；
  * 收场时恢复原值。
@@ -100,17 +96,16 @@ public class SiteRevealScreen extends Screen {
      * 唯一一次 169 ms 卡帧正好压在"半径 6（13×13）客户端编译完"那一刻 —— 是网格上传，不是镜头。
      * 等它就位再开场，卡顿就不再叠在收尾上。
      *
-     * <p><b>判据换成「真实网格进过绘制列表」</b>（和让位用的是同一份 Sodium 回报）：
-     * 原来问原版 {@code LevelRenderer#isSectionCompiled}，而 Sodium 接管了区块渲染，那个接口
-     * 在 Sodium 下永远报未编译 —— 判据永远不成立，只能干等到超时，这就是"已移交真实区块之后
-     * 还在天上停十几秒"的原因。没装 Sodium（收不到回报）时直接放行，不拿这条卡人。
+     * <p><b>判据是原版 {@code LevelRenderer#isSectionCompiled}</b>：等出生点这一圈真实区块的网格
+     * 都编译好了再开场，卡顿就不会叠在收尾上。这只是"让卡顿别叠在一起"的余量：
+     * 超过 {@link #GATE_GRACE_MS} 还没就位就照样走，不拿这条卡人。
      */
     private static final int GATE_READY_RADIUS = 6;
     /** 查门口的画面上屏状态别每帧查（169 个区块，每帧查也够呛）。 */
     private static final long GATE_READY_POLL_MS = 250L;
     /**
-     * 等待圈已经露完之后，最多再给门口这片这么久（毫秒）：门口那几列可能正好在相机背面、
-     * 永远进不了绘制列表，不能让它把人吊死。
+     * 等待圈已经露完之后，最多再给门口这片这么久（毫秒）：视距边缘那几列可能永远编不完，
+     * 不能让它把人吊死。
      */
     private static final long GATE_GRACE_MS = 1_200L;
     /** 总上限：动画再好看也不能把人关在外面。 */
@@ -359,7 +354,7 @@ public class SiteRevealScreen extends Screen {
                     gateAreaReady = gateAreaCompiled(plan);
                 }
                 // 门口那片只是"让卡顿别叠在收尾上"的余量：圈已经露完就先等一小会儿，
-                // 它要是永远不就位（相机背面 / 没装 Sodium），到点照样走，不能把人吊在天上
+                // 它要是永远不就位（视距边缘编不完），到点照样走，不能把人吊在天上
                 boolean gateSettled = gateAreaReady
                         || (allReadyAt != 0L && now - allReadyAt >= GATE_GRACE_MS);
                 boolean timeout = now - aerialAt >= REVEAL_READY_CAP_MS;
@@ -563,13 +558,10 @@ public class SiteRevealScreen extends Screen {
     }
 
     /**
-     * 出生点周围这一片（方形半径 {@link #GATE_READY_RADIUS}）的真实网格上没上屏。
+     * 出生点周围这一片（方形半径 {@link #GATE_READY_RADIUS}）的真实网格都编译好了没有。
      *
-     * <p>判据是<b>Sodium 绘制列表的回报</b>（{@code ChunkRenderListMixin} 每帧迭代到就记一次），
-     * 和柱子的让位判据同源。以前问的是原版 {@code LevelRenderer#isSectionCompiled}，
-     * 而 Sodium 接管了区块渲染，那个接口在它下面永远报"未编译" —— 判据永远不成立，
-     * 只能等到 33 秒的超时兜底，表现就是"显示已移交真实区块之后，还在天上停十几秒"。
-     * 收不到回报（没装 Sodium）时由 {@link SiteRevealWorldRenderer#gateAreaDrawn} 直接放行。
+     * <p>问的是原版 {@code LevelRenderer#isSectionCompiled}（{@link ChunkLoadDiagnostics#areaCompiled}）。
+     * 它只是"别让网格上传的卡顿叠在落机上"的余量，{@link #GATE_GRACE_MS} 到点就放行，不卡人。
      */
     private boolean gateAreaCompiled(SitePlan plan) {
         Minecraft mc = this.minecraft;
@@ -577,7 +569,7 @@ public class SiteRevealScreen extends Screen {
         BlockPos spawn = new BlockPos(plan.spawnX(), plan.spawnY(), plan.spawnZ());
         int radius = Math.min(GATE_READY_RADIUS,
                 Math.max(1, mc.options.renderDistance().get() - 1));
-        return world != null && world.gateAreaDrawn(spawn.getX() >> 4, spawn.getZ() >> 4, radius);
+        return ChunkLoadDiagnostics.areaCompiled(mc, spawn.getX() >> 4, spawn.getZ() >> 4, radius);
     }
 
     /**
@@ -659,30 +651,6 @@ public class SiteRevealScreen extends Screen {
 
     private float descendPitch(float descend, float vanillaPitch) {
         return Mth.rotLerp(lookBlend(descend), world.pitch(), vanillaPitch);
-    }
-
-    // ── 真实区块渲染过滤（Sodium mixin 调进来）──────────────────────────
-
-    /** 当前是否在按区块列隐藏真实地形。 */
-    public static boolean cullingActive() {
-        SiteRevealScreen self = active;
-        return self != null && self.world != null && self.loginAt != 0L && self.descendAt == 0L;
-    }
-
-    /** 这个区块列的真实地形要不要藏起来；落机一开始就全部放行。 */
-    public static boolean hidesChunk(int chunkX, int chunkZ) {
-        SiteRevealScreen self = active;
-        if (self == null || self.world == null || self.loginAt == 0L || self.descendAt != 0L) {
-            return false;
-        }
-        return self.world.isHidden(chunkX, chunkZ);
-    }
-
-    /** Sodium 的绘制列表回报：这个区块列的真实网格这一帧确实被迭代到（淡出的前置条件）。 */
-    public static void noteSectionDrawn(int chunkX, int chunkZ) {
-        SiteRevealScreen self = active;
-        if (self == null || self.world == null || self.loginAt == 0L) return;
-        self.world.noteSectionDrawn(chunkX, chunkZ);
     }
 
     /** 收场：把画面交回给世界（落到位、玩家按 ESC、或撞到上限）。 */

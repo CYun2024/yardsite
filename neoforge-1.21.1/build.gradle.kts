@@ -83,45 +83,6 @@ tasks.processResources {
     from("../LICENSE")
 }
 
-// Sodium：落成动画期间按区块列过滤 section 的绘制。jar **不打包**，只做编译期依赖；
-// 运行时靠 mixin 配置里的 "required": false 兜底，没装 Sodium 就自动关掉这组 mixin。
-// 第三方 jar 的唯一位置是仓库根的 libs/（不再猜 .deps / 上一层 / 上两层）。
-val sodiumName = "sodium-neoforge-0.8.13+mc1.21.1-mod.jar"
-val sodiumJar = siteRoot.resolve("libs").resolve(sodiumName).takeIf { it.isFile }
-
-dependencies {
-    if (sodiumJar != null) {
-        compileOnly(files(sodiumJar))
-    }
-}
-
-if (sodiumJar == null) {
-    println("[yardsite] 未找到 libs/$sodiumName（放到 site/libs/ 即可启用 Sodium 判据），本次构建跳过这组 mixin")
-    sourceSets.main {
-        java {
-            exclude("dev/yard/site/mixin/sodium/**")
-        }
-        resources {
-            // 配置里列的类没编进来的话，运行时会报一串"找不到 mixin"，干脆一起不带
-            exclude("yardsite.sodium.mixins.json")
-        }
-    }
-    // 但 mods.toml 里那条 [[mixins]] 也得一起去掉：声明的配置文件不存在，
-    // NeoForge 在 mixin 引导阶段直接抛异常 —— 表现就是"启动就崩"，日志停在 mixin 版本那几行。
-    tasks.processResources {
-        doLast {
-            val file = layout.buildDirectory.file("resources/main/META-INF/neoforge.mods.toml").get().asFile
-            if (file.isFile) {
-                val text = file.readText()
-                val stripped = text.replace(
-                    Regex("#!sodium-mixin-begin.*?#!sodium-mixin-end[ \\t]*\\r?\\n?",
-                        RegexOption.DOT_MATCHES_ALL), "")
-                if (stripped != text) file.writeText(stripped)
-            }
-        }
-    }
-}
-
 afterEvaluate {
     // MDG 会自动把被墙的官方源加进项目仓库；Gradle 对连接错误不回退，必须移除
     val deadRepos = repositories

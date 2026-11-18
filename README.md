@@ -59,7 +59,7 @@ Enable `structure.enabled` to display the structure footprint on the selection m
 
 - Minecraft 1.21.1, NeoForge 21.1.x, Java 21.
 - No required dependencies. Projection files are parsed by this mod.
-- Sodium is optional. When installed, the handover between real terrain and the sandbox is more precise; without it, functionality is unaffected.
+- Sodium is not required (Sodium support was removed in 0.2.0 — vanilla rendering performs the same).
 - Applies to single-player and LAN world creation only. Dedicated servers do not have this flow.
 
 ## Configuration
@@ -116,9 +116,8 @@ Layout:
 
 - `common/` — loader- and version-agnostic shared core (the only copy of the source)
 - `neoforge-1.21.1/`, `forge-1.20.1/` — version shells: platform implementation, loader resources, build scripts
-- `libs/` — compile-time-only third-party jars (Sodium); not committed
 
-Sodium is used only for optional compile-time culling hooks. Place the corresponding Sodium jar in `libs/` to enable them; the build succeeds without it.
+No third-party compile-time dependencies, so there is no `libs/`.
 
 ### 1.20.1 Forge (legacy)
 

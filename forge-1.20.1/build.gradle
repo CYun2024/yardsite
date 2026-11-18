@@ -74,9 +74,7 @@ repositories {
 def generatedForgeSources = layout.buildDirectory.dir('generated/forge-src')
 def generateForgeSources = tasks.register('generateForgeSources', Sync) {
     from('../common/src/main/java') {
-        // 1.21.1 NeoForge 平台实现、Sodium mixin、以及 1.20.1 有专门替代的 mixin 不进来
-        exclude 'dev/yard/site/platform/neoforge/**'
-        exclude 'dev/yard/site/mixin/sodium/**'
+        // 1.20.1 有专门替代实现的两个 mixin 不进来（common 里不再有加载器专属代码，无需排除平台包）
         exclude 'dev/yard/site/mixin/CameraMixin.java'
         exclude 'dev/yard/site/mixin/WorldOpenFlowsMixin.java'
     }
